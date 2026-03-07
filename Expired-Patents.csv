@@ -1,0 +1,21 @@
+Category,Patent/Reference,Filed,Expired,Inventor(s),Title/Description,Relevance to Kestrel/SERDES
+PLL Core,US5727038,1995,2015,Maneatis,"Self-biased PLL with replica-biased delay cells, constant loop dynamics independent of PVT",Foundation of Kestrel PLL generator — self-biased charge-pump architecture
+PLL Core,US5736892,1995,2015,Maneatis,"Low-jitter process-independent DLL and PLL based on self-biased techniques",Companion patent to US5727038 — DLL variant and additional PLL claims
+PLL Core,US5243303,1991,2011,"Maneatis, Horowitz",Precise delay generation using coupled oscillators,Grandfather patent for coupled ring oscillator delay cells used in VCO
+PLL Core,US6959064,2001,2021,Cameron (TCI assignment),"Multimode clock recovery PLL for ATM networks, adaptive/SRTS modes",Digital PLL architecture with mode-switching — applicable to multi-protocol clock recovery
+PLL Bias,US20040104764A1,2003,2023,Various,"Bias generator with improved stability for Maneatis self-biased PLL, no RC compensation",Improved bias loop stability without area-expensive compensation capacitor
+Phase Detector,US4773085,1986,2006,Alexander,Bang-bang phase detector using three flip-flops,Most widely used CDR phase detector — trivial to implement at full or half rate
+Phase Detector,Pre-patent (1976),1976,N/A,"Mueller, Muller",Baud-rate timing recovery using data and error samples,ADC-free CDR technique — no edge sampling required. Academic publication not patent
+Phase Detector,Pre-patent (1978),1978,N/A,Hogge,Linear phase detector with proportional error output,Better jitter characterization than bang-bang — useful for probability waveform analysis
+Equalization DFE,US6690741,2000,2020,"Zerbe, Stonick (Rambus)",Half-rate CDR with integrated equalization,Combined EQ/CDR in single loop — key architecture for SERDES receiver
+Equalization DFE,Rambus speculative DFE family,2002-2004,2022-2024,"Stojanovic, Ho, Horowitz (Rambus)",Loop-unrolled/speculative DFE — precompute both feedback values and mux after decision,Critical technique for meeting single-UI feedback timing in high-speed DFE
+Equalization CTLE,Generic source-degenerated diff pair,Pre-2000,Expired,Various (textbook),Programmable CTLE using switched degeneration R/C for pole/zero placement,Standard receiver front-end equalization — fully open
+Equalization FFE,Generic FIR pre-emphasis,Pre-2000,Expired,Various (textbook),TX FFE using weighted tap delay line for pre-emphasis,Standard transmitter equalization — fully open
+VCO LC,Cross-coupled LC-VCO family,Late 1990s,Expired,Various,"Cross-coupled NMOS/PMOS with on-chip inductor, varactor tuning, switched cap banks",Sub-500fs jitter VCO option for Kestrel — needed for SERDES reference clocks
+VCO Ring,Razavi interpolative ring VCO,Late 1990s,Expired,Razavi,Ring oscillator with phase interpolation for fine frequency control,Alternative VCO topology with fine-grained frequency tuning
+Phase Interpolator,US6125157,1997,2017,"Garlepp (Rambus)",Weighted current-steering phase interpolator from reference clock phases,Essential for CDR and multi-phase clock distribution in SERDES
+Phase Interpolator,Rambus PI family,Late 1990s,Expired,"Garlepp, Shulley (Rambus)",Current-mode phase interpolator with thermometer-coded DAC weighting,Fine phase adjustment for baud-rate CDR and data sampling
+Ring Oscillator,EP2151052B1,2008,2028,Various,Ring oscillator with variable resistive load for PLL — cites Maneatis as prior art,Alternative ring VCO with direct frequency control via configuration signal
+Charge Pump,Generic symmetric CP,Pre-2000,Expired,Various (textbook),"Symmetric up/down charge pump with current matching, rail-to-rail output",Standard charge pump topology — no patent barriers
+Loop Filter,Generic on-chip R-C filter,Pre-2000,Expired,Various (textbook),"Second/third order loop filter with MIM/MOM caps and poly resistors",Standard loop filter — process-dependent sizing but topology is open
+Frequency Divider,Generic TSPC/CML divider,Pre-2000,Expired,Various (textbook),"True single-phase clock and current-mode logic dividers, programmable modulus",Standard divider topologies for integer-N and prescaler stages
