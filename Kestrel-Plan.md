@@ -342,3 +342,247 @@ Apache 2.0 — use it, modify it, ship it. Attribution appreciated.
 - SkyWater SKY130 PDK: https://github.com/google/skywater-pdk
 - GF180MCU PDK: https://github.com/google/gf180mcu-pdk
 - gdsfactory: https://github.com/gdsfactory/gdsfactory
+
+---
+
+## Appendix A: LC-VCO Option
+
+For sub-picosecond jitter applications (SERDES reference clocks, high-speed ADC
+clocking), ring oscillator VCOs cannot compete with LC-tank VCOs. The Q factor
+of an on-chip spiral inductor (typically 5-15) gives 10-20 dB better phase noise
+than an equivalent ring oscillator. Kestrel includes an LC-VCO generator path
+built on open-source inductor design and layout tools.
+
+### Architecture
+
+The LC-VCO uses a cross-coupled NMOS (or complementary NMOS/PMOS) negative
+resistance pair with an on-chip spiral inductor and MOS varactor tank. The
+cross-coupled pair topology is covered by expired patents from the late 1990s.
+
+```
+        VDD
+         │
+    ┌────┴────┐
+    │  Ibias  │
+    └────┬────┘
+         │
+   ┌─────┼─────┐
+   │     │     │
+ ┌─┴─┐ ┌┴┐ ┌─┴─┐
+ │M1 │ │L│ │M2 │    L = spiral inductor
+ └─┬─┘ └┬┘ └─┬─┘    C = varactor bank
+   │  ┌─┴─┐  │      M1/M2 = cross-coupled pair
+   │  │ C │  │
+   │  └─┬─┘  │
+   ├────┬┘───┤
+   │    │     │
+   └────┴─────┘
+        GND
+```
+
+### Open-Source Tool Chain
+
+The LC-VCO generator uses four open-source tools in sequence:
+
+**1. ASITIC (Berkeley) — Inductor Design Engine**
+
+- Source: http://rfic.eecs.berkeley.edu/~niknejad/asitic.html
+- Function: Given target L, Q, frequency, and process metal stack,
+  sweeps the inductor geometry space (turns, width, spacing, diameter,
+  shape) and identifies optimal designs.
+- Input: Technology file describing metal layers, thicknesses,
+  sheet resistance, substrate properties.
+- Output: Geometry parameters, L/Q/SRF vs frequency, lumped
+  equivalent circuit (pi-model with substrate parasitics).
+- Process support: Technology files available for SkyWater 130nm
+  (academic ports), IHP SG13G2, and readily created for any process
+  with known metal stack parameters.
+
+**2. RapidPassives — GDS Layout Generation**
+
+- Source: https://github.com/milanofthe/rapidpassives
+- License: Open source
+- Function: Generates DRC-aware GDS for spiral inductors and
+  transformers from geometry parameters.
+- Supports: Spiral inductors (square, octagonal), symmetric inductors
+  (with center tap for differential VCOs), transformers.
+- Features: Via array generation, geometry validation (no clipping or
+  overlap), arbitrary winding counts and ratios.
+- Integration: Pure Python, outputs GDS directly, trivial to wire
+  into gdsfactory component assembly.
+
+**3. Mühlhaus RFIC Inductor Toolkit — Synthesis and Modeling**
+
+- Source: https://github.com/VolkerMuehlhaus/RFIC-Inductor-Toolkit-Open
+- License: MIT (open-sourced August 2025)
+- Function: End-to-end inductor synthesis — from specs to DRC-clean
+  layout with equivalent circuit model and Spectre netlist.
+- Supports: Symmetric octagonal, symmetric square, asymmetric square
+  inductors. Patterned ground shields (PGS) for improved Q.
+- Limitation: EM simulation step uses Keysight ADS Momentum.
+  Layout generation and equivalent circuit extraction logic is open
+  and can be used independently with alternative EM solvers.
+- Value: The equivalent circuit extraction methodology and PGS
+  geometry generation are directly reusable.
+
+**4. FastHenry / FastCap (MIT) — Inductance/Capacitance Extraction**
+
+- Source: https://www.fastfieldsolvers.com/
+- License: Open source (MIT origin)
+- Function: 3D inductance and capacitance extraction from arbitrary
+  conductor geometries. Purpose-built for IC interconnect and spiral
+  inductors.
+- Use in Kestrel: Post-layout verification of inductor L and Q.
+  Cross-checks ASITIC's analytical model against a numerical
+  field solution of the actual generated layout geometry.
+- Alternative: OpenEMS (open-source FDTD) for full-wave EM
+  verification when substrate effects are critical.
+
+### LC-VCO Generator Flow
+
+```
+User specs (jitter target, freq range, process)
+        │
+        ▼
+┌───────────────────┐
+│  VCO Design Engine │  ← Determines required L, Q, tuning range
+│                    │     from phase noise/jitter budget
+│  Phase noise model:│     Leeson's equation + tank Q + bias current
+│  PN = f(L, Q, I)  │     → minimum Q for jitter target
+└───────┬───────────┘     → required L from target frequency
+        │
+        ▼
+┌───────────────────┐
+│  ASITIC            │  ← Sweep inductor geometry space
+│                    │     for target L, Q at operating freq
+│  Input: L, Q, f,  │
+│    technology file │     Output: optimal (N, W, S, Dout, shape)
+└───────┬───────────┘     + lumped equivalent circuit
+        │
+        ├─────────────────────────────────┐
+        ▼                                 ▼
+┌───────────────────┐           ┌───────────────────┐
+│  RapidPassives     │           │  FastHenry         │
+│                    │           │                    │
+│  Generate GDS from │           │  Verify L, Q from  │
+│  ASITIC geometry   │           │  3D field solution  │
+│  + PGS if needed   │           │  of generated layout│
+└───────┬───────────┘           └───────┬───────────┘
+        │                               │
+        ▼                               ▼
+┌───────────────────┐           ┌───────────────────┐
+│  gdsfactory        │           │  Check: L, Q meet  │
+│                    │           │  spec? If not,      │
+│  Assemble full VCO:│           │  iterate ASITIC     │
+│  inductor +        │           │  with tighter       │
+│  cross-coupled pair│           │  constraints        │
+│  + varactor bank   │           └───────────────────┘
+│  + bias circuit    │
+│  + guard rings     │
+└───────┬───────────┘
+        │
+        ▼
+┌───────────────────┐
+│  Output            │
+│                    │
+│  • VCO GDS layout  │
+│  • SPICE netlist   │
+│    (with extracted │
+│    inductor model) │
+│  • Verilog-AMS     │
+│    behavioral VCO  │
+└───────────────────┘
+```
+
+### Inductor Geometry Parameters
+
+The ASITIC optimization explores this parameter space:
+
+| Parameter       | Typical Range (Sky130)     | Description                    |
+|-----------------|----------------------------|--------------------------------|
+| Shape           | square, octagonal          | Octagonal preferred for Q      |
+| N (turns)       | 2 - 8                      | More turns = more L, lower SRF |
+| W (width)       | 3 - 15 µm                  | Wider = lower R, more C        |
+| S (spacing)     | 2 - 5 µm (DRC limited)    | Tighter = more L, more C       |
+| Dout (diameter) | 100 - 400 µm              | Larger = higher Q, more area   |
+| Metal layer     | Top metal (M5 on Sky130)   | Thickest metal for lowest R    |
+| PGS             | poly-Si patterned shield   | Reduces substrate coupling     |
+| Center tap      | yes (for differential)     | Required for cross-coupled VCO |
+
+### Equivalent Circuit Model
+
+The generated inductor model uses a frequency-dependent pi-network:
+
+```
+        Ls          Rs(f)
+  ──────/\/\/──────/\/\/──────
+  │                           │
+  │    Cp                Cp   │
+  ├────||────┐     ┌────||────┤
+  │          │     │          │
+  │    Rsub  │     │  Rsub    │
+  ├──/\/\/───┤     ├──/\/\/───┤
+  │          │     │          │
+  │    Csub  │     │  Csub    │
+  ├────||────┘     └────||────┤
+  │                           │
+  ─────────────────────────────
+             GND
+
+  Ls   = series inductance
+  Rs   = series resistance (frequency-dependent, skin/proximity)
+  Cp   = parallel capacitance (interwinding + oxide)
+  Rsub = substrate resistance
+  Csub = substrate capacitance
+```
+
+Parameters are extracted by ASITIC's analytical model and verified by
+FastHenry's numerical extraction. Both representations (lumped circuit
+and S-parameter touchstone) are emitted for use in SPICE and
+Verilog-AMS respectively.
+
+### Varactor Bank
+
+The LC tank tuning uses accumulation-mode MOS varactors (available in
+both Sky130 and GF180). The varactor bank is split into:
+
+- **Coarse tuning**: Switched MOM capacitor bank (4-6 bits) for
+  covering the full frequency range without excessive VCO gain.
+- **Fine tuning**: Analog varactor (continuous) driven by the PLL
+  loop filter output. Kvco kept small for low phase noise.
+
+The switched capacitor bank layout is generated by gdsfactory from
+the required capacitance values computed by the design engine. Each
+switch is a thick-oxide NMOS with known Ron, sized to maintain tank Q.
+
+### Additional Milestones for LC-VCO
+
+### M5: LC-VCO on SkyWater 130nm (Month 5-6)
+
+- ASITIC technology file validation against published Sky130 inductor data
+- RapidPassives integration into gdsfactory pipeline
+- Cross-coupled NMOS pair layout generator (parameterized W/L, fingers)
+- Varactor bank layout generator (switched cap + analog)
+- Full LC-VCO assembly with PGS
+- FastHenry extraction and verification loop
+- DRC/LVS clean
+- Phase noise simulation in Xyce
+
+### M6: LC-VCO on GF180 + Characterization (Month 7)
+
+- GF180MCU technology file for ASITIC
+- Port layout generators to GF180 metal stack
+- Silicon validation if shuttle run available (Efabless/Google MPW)
+- Publish measured vs. simulated inductor Q and VCO phase noise
+
+### LC-VCO References
+
+- A. M. Niknejad and R. G. Meyer, "Analysis, Design, and Optimization
+  of Spiral Inductors and Transformers for Si RF ICs," JSSC, 1998.
+- ASITIC: http://rfic.eecs.berkeley.edu/~niknejad/asitic.html
+- RapidPassives: https://github.com/milanofthe/rapidpassives
+- Mühlhaus Inductor Toolkit: https://github.com/VolkerMuehlhaus/RFIC-Inductor-Toolkit-Open
+- FastHenry: https://www.fastfieldsolvers.com/
+- OpenEMS: https://openems.de/
+- B. Razavi, "Design of Analog CMOS Integrated Circuits," Ch. 14 (Oscillators).
+- T. H. Lee, "The Design of CMOS Radio-Frequency Integrated Circuits," Ch. 17-18.
