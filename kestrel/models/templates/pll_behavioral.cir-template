@@ -1,0 +1,21 @@
+* Kestrel PLL Generator — Behavioral SPICE Model
+*
+* Target: @FREQ_MIN@ - @FREQ_MAX@
+* Ref:    @REF_FREQ@ (@REF_AMPLITUDE@V)
+* VCO:    @F_CENTER@ center, @KVCO@ Hz/V gain
+* Filter: R=@R_FILTER@, C1=@C1@, C2=@C2@
+* Divider: N=@N_NOM@
+*
+* Topology: Phase-detector → Loop-filter → VCO → Divider → feedback
+* B-source behavioral model suitable for system-level verification.
+*
+Vref in 0 SIN(0 @REF_AMPLITUDE@ @REF_FREQ@)
+Bpd pd 0 V = {V(in) * V(fb)}
+R1 pd lpf @R_FILTER@
+C1 lpf 0 @C1@
+C2 pd 0 @C2@
+Bvco vco 0 V = {SIN(6.283185 * (@F_CENTER@*TIME + @KVCO@*SDT(V(lpf))))}
+Bdiv fb 0 V = {SIN(6.283185 * (@F_CENTER@/@N_NOM@*TIME + @KVCO@/@N_NOM@*SDT(V(lpf))))}
+.TRAN @TRAN_STEP@ @TRAN_STOP@
+.PRINT TRAN V(in) V(vco) V(lpf) V(fb)
+.END

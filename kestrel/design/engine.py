@@ -50,6 +50,38 @@ class PLLDesign:
     pm_actual: float = 0.0       # degrees — actual phase margin
     jitter_est: float = 0.0      # seconds rms — estimated jitter
 
+    # Transistor sizing — VCO delay cell
+    vco_tail_w: float = 0.0      # m — tail current NMOS width
+    vco_tail_l: float = 0.0      # m — tail current NMOS length
+    vco_diff_w: float = 0.0      # m — differential pair NMOS width
+    vco_diff_l: float = 0.0      # m — differential pair NMOS length
+    vco_load_w: float = 0.0      # m — symmetric load PMOS width
+    vco_load_l: float = 0.0      # m — symmetric load PMOS length
+    vco_bias_w: float = 0.0      # m — bias mirror NMOS width
+    vco_bias_l: float = 0.0      # m — bias mirror NMOS length
+    vco_i_stage: float = 0.0     # A — current per delay stage
+
+    # Transistor sizing — charge pump
+    cp_up_w: float = 0.0         # m — UP current source PMOS width
+    cp_up_l: float = 0.0         # m — UP current source PMOS length
+    cp_dn_w: float = 0.0         # m — DN current source NMOS width
+    cp_dn_l: float = 0.0         # m — DN current source NMOS length
+    cp_sw_w: float = 0.0         # m — switch transistor width
+    cp_sw_l: float = 0.0         # m — switch transistor length
+
+    # Transistor sizing — PFD
+    pfd_nw: float = 0.0          # m — PFD NMOS width
+    pfd_nl: float = 0.0          # m — PFD NMOS length
+    pfd_pw: float = 0.0          # m — PFD PMOS width
+    pfd_pl: float = 0.0          # m — PFD PMOS length
+
+    # Transistor sizing — divider
+    div_nw: float = 0.0          # m — divider NMOS width
+    div_nl: float = 0.0          # m — divider NMOS length
+    div_pw: float = 0.0          # m — divider PMOS width
+    div_pl: float = 0.0          # m — divider PMOS length
+    div_stages: int = 0          # number of divide-by-2 stages
+
     # Status
     warnings: list = field(default_factory=list)
 
@@ -178,7 +210,150 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
             f"target {spec.jitter_target*1e12:.1f}ps"
         )
 
+    # --- Transistor sizing ---
+    _size_transistors(d)
+
     return d
+
+
+# ---------------------------------------------------------------------------
+# Process parameters
+# ---------------------------------------------------------------------------
+
+_PROCESS_PARAMS = {
+    "sky130": {
+        "nfet": "sky130_fd_pr__nfet_01v8",
+        "pfet": "sky130_fd_pr__pfet_01v8",
+        "lmin": 150e-9,       # m — minimum drawn length
+        "l_analog": 360e-9,   # m — typical analog length (better matching)
+        "kpn": 270e-6,        # A/V^2 — approximate NMOS kp (uCox*W/L factor)
+        "kpp": 90e-6,         # A/V^2 — approximate PMOS kp
+        "vtn": 0.4,           # V — NMOS threshold (approximate)
+        "vtp": 0.4,           # V — PMOS |Vtp| (approximate)
+        "vdd": 1.8,
+        "model_lib": "sky130_fd_pr/cells",
+        "corner": "tt",
+    },
+    "gf180": {
+        "nfet": "nfet_03v3",
+        "pfet": "pfet_03v3",
+        "lmin": 280e-9,
+        "l_analog": 500e-9,
+        "kpn": 200e-6,
+        "kpp": 65e-6,
+        "vtn": 0.5,
+        "vtp": 0.5,
+        "vdd": 3.3,
+        "model_lib": "gf180mcu_fd_pr",
+        "corner": "tt",
+    },
+}
+
+
+def get_process_params(process: str) -> dict:
+    """Return process parameters for the given process name."""
+    return _PROCESS_PARAMS[process]
+
+
+def _size_transistors(d: PLLDesign):
+    """Compute transistor W/L for all PLL blocks.
+
+    Uses square-law MOSFET equations for initial sizing.
+    These are starting points — real designs need SPICE optimization.
+    """
+    proc = _PROCESS_PARAMS.get(d.spec.process, _PROCESS_PARAMS["sky130"])
+    lmin = proc["lmin"]
+    l_an = proc["l_analog"]
+    kpn = proc["kpn"]
+    kpp = proc["kpp"]
+    vtn = proc["vtn"]
+    vtp = proc["vtp"]
+    vdd = d.spec.supply_voltage
+
+    # --- VCO delay cell sizing ---
+    # Ring oscillator: f = 1 / (2 * N_stages * t_delay)
+    # t_delay = C_load * V_swing / I_stage
+    # Target current per stage from frequency and estimated load cap
+    n_stg = d.spec.vco_stages
+    t_delay = 1.0 / (2 * n_stg * d.f_center)
+
+    # Estimate load capacitance from gate cap of next stage
+    # Start with reasonable current and iterate
+    # I_stage = C_load * V_swing / t_delay
+    # V_swing ~ 0.4 * Vdd for differential ring
+    v_swing_vco = 0.4 * vdd
+    # Assume C_load ~ 20fF initial guess (gate cap + wiring)
+    c_load_est = 20e-15
+    d.vco_i_stage = c_load_est * v_swing_vco / t_delay
+
+    # Clamp to reasonable range
+    d.vco_i_stage = max(50e-6, min(2e-3, d.vco_i_stage))
+
+    # Differential pair: Id = 0.5 * kpn * (W/L) * (Vgs - Vtn)^2
+    # Vgs ~ Vdd/2 for biasing at mid-rail
+    vgs_diff = vdd / 2
+    vov_diff = vgs_diff - vtn
+    if vov_diff < 0.1:
+        vov_diff = 0.1
+    # Each transistor carries half the tail current
+    i_half = d.vco_i_stage / 2
+    # W/L = 2*Id / (kpn * Vov^2)
+    wl_diff = 2 * i_half / (kpn * vov_diff * vov_diff)
+    d.vco_diff_l = lmin
+    d.vco_diff_w = max(lmin * 2, wl_diff * d.vco_diff_l)
+
+    # Tail current source: carries full stage current
+    vov_tail = 0.2  # modest overdrive for good matching
+    wl_tail = 2 * d.vco_i_stage / (kpn * vov_tail * vov_tail)
+    d.vco_tail_l = l_an  # longer L for current source matching
+    d.vco_tail_w = max(lmin * 2, wl_tail * d.vco_tail_l)
+
+    # Symmetric load PMOS (Maneatis): sized to set output swing
+    # Each load PMOS carries half the stage current in triode/saturation boundary
+    vov_load = 0.15
+    wl_load = 2 * i_half / (kpp * vov_load * vov_load)
+    d.vco_load_l = l_an
+    d.vco_load_w = max(lmin * 2, wl_load * d.vco_load_l)
+
+    # Bias mirror NMOS: mirrors the tail current
+    d.vco_bias_l = l_an
+    d.vco_bias_w = d.vco_tail_w  # 1:1 mirror ratio
+
+    # --- Charge pump sizing ---
+    # UP source (PMOS): Icp = 0.5 * kpp * (W/L) * (Vsg - |Vtp|)^2
+    vov_cp = 0.25  # overdrive for output compliance
+    wl_cp_up = 2 * d.icp / (kpp * vov_cp * vov_cp)
+    d.cp_up_l = l_an
+    d.cp_up_w = max(lmin * 2, wl_cp_up * d.cp_up_l)
+
+    # DN sink (NMOS)
+    wl_cp_dn = 2 * d.icp / (kpn * vov_cp * vov_cp)
+    d.cp_dn_l = l_an
+    d.cp_dn_w = max(lmin * 2, wl_cp_dn * d.cp_dn_l)
+
+    # Switches: wide for low Ron, minimum length for speed
+    d.cp_sw_l = lmin
+    d.cp_sw_w = max(1e-6, d.cp_up_w * 2)  # 2x current source for low drop
+
+    # --- PFD sizing ---
+    # Digital gates: sized for speed at target reference frequency
+    # Minimum length, width scaled for fanout
+    d.pfd_nl = lmin
+    d.pfd_pl = lmin
+    # PMOS ~2x NMOS for balanced rise/fall (mobility ratio)
+    d.pfd_nw = max(lmin * 3, 500e-9)
+    d.pfd_pw = max(d.pfd_nw * 2, 1e-6)
+
+    # --- Divider sizing ---
+    # Must operate at VCO frequency — use minimum length
+    d.div_nl = lmin
+    d.div_pl = lmin
+    # Width: scale with frequency for adequate drive
+    w_scale = max(1.0, d.f_center / 500e6)
+    d.div_nw = max(lmin * 3, 500e-9 * w_scale)
+    d.div_pw = max(d.div_nw * 2, 1e-6 * w_scale)
+    # Number of divide-by-2 stages: N = 2^stages, pick minimum
+    d.div_stages = max(1, math.ceil(math.log2(d.n_nom)))
 
 
 def format_eng(value: float, unit: str = "") -> str:

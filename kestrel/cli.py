@@ -5,6 +5,8 @@ import sys
 
 from .design.engine import PLLSpec, design_pll, summarize
 from .models.verilog_ams import emit_verilog_ams
+from .models.spice import emit_spice
+from .models.behavioral import emit_behavioral, emit_kicad_sch
 
 
 def main():
@@ -56,6 +58,15 @@ def main():
         print(summarize(design))
         print()
         files = emit_verilog_ams(design, args.output)
+        for f in files:
+            print(f"  wrote {f}")
+        print()
+        files = emit_spice(design, args.output)
+        for f in files:
+            print(f"  wrote {f}")
+        print()
+        files = emit_behavioral(design, args.output)
+        files += emit_kicad_sch(design, args.output)
         for f in files:
             print(f"  wrote {f}")
     else:

@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 from .design.engine import PLLSpec, design_pll, summarize
 from .models.verilog_ams import emit_verilog_ams
+from .models.spice import emit_spice
 from .spec import parse_freq, parse_time
 
 
@@ -81,7 +82,9 @@ class KestrelGUI:
         frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
 
         ttk.Button(frame, text="Design", command=self._on_design).pack(side="left", padx=5)
-        ttk.Button(frame, text="Generate Verilog-AMS", command=self._on_generate).pack(side="left", padx=5)
+        ttk.Button(frame, text="Generate Verilog-AMS", command=self._on_generate_vams).pack(side="left", padx=5)
+        ttk.Button(frame, text="Generate SPICE", command=self._on_generate_spice).pack(side="left", padx=5)
+        ttk.Button(frame, text="Generate All", command=self._on_generate_all).pack(side="left", padx=5)
         ttk.Button(frame, text="Save Summary...", command=self._on_save_summary).pack(side="left", padx=5)
 
     def _build_output_frame(self):
@@ -127,18 +130,48 @@ class KestrelGUI:
         self.output_text.delete("1.0", "end")
         self.output_text.insert("1.0", summary)
 
-    def _on_generate(self):
+    def _ensure_design(self):
         if not self.design:
             self._on_design()
-        if not self.design:
-            return
+        return self.design is not None
 
+    def _on_generate_vams(self):
+        if not self._ensure_design():
+            return
         out_dir = filedialog.askdirectory(title="Select output directory")
         if not out_dir:
             return
-
         try:
             files = emit_verilog_ams(self.design, out_dir)
+            msg = "Verilog-AMS files:\n" + "\n".join(f"  {os.path.basename(f)}" for f in files)
+            self.output_text.insert("end", f"\n\n{msg}\n")
+            messagebox.showinfo("Success", msg)
+        except Exception as e:
+            messagebox.showerror("Generation error", str(e))
+
+    def _on_generate_spice(self):
+        if not self._ensure_design():
+            return
+        out_dir = filedialog.askdirectory(title="Select output directory")
+        if not out_dir:
+            return
+        try:
+            files = emit_spice(self.design, out_dir)
+            msg = "SPICE files:\n" + "\n".join(f"  {os.path.basename(f)}" for f in files)
+            self.output_text.insert("end", f"\n\n{msg}\n")
+            messagebox.showinfo("Success", msg)
+        except Exception as e:
+            messagebox.showerror("Generation error", str(e))
+
+    def _on_generate_all(self):
+        if not self._ensure_design():
+            return
+        out_dir = filedialog.askdirectory(title="Select output directory")
+        if not out_dir:
+            return
+        try:
+            files = emit_verilog_ams(self.design, out_dir)
+            files += emit_spice(self.design, out_dir)
             msg = "Generated files:\n" + "\n".join(f"  {os.path.basename(f)}" for f in files)
             self.output_text.insert("end", f"\n\n{msg}\n")
             messagebox.showinfo("Success", msg)
