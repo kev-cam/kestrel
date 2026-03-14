@@ -1,0 +1,31 @@
+// kes_lf.va — Loop filter (2nd order passive)
+//
+// R1 in series with C1, C2 shunt on input.
+// Pure passive — could be plain SPICE but keeping as VA
+// for consistent interface.
+
+`include "disciplines.vams"
+`include "constants.vams"
+
+module kes_lf(inp, vctrl);
+    inout  inp, vctrl;
+    electrical inp, vctrl, mid;
+
+    parameter real r1 = 20.153e3;    // ohms
+    parameter real c1 = 5.895e-12;   // F — main integrating cap
+    parameter real c2 = 456.0e-15;   // F — ripple bypass cap
+
+    analog begin
+        // C2: input to ground
+        I(inp) <+ c2 * ddt(V(inp));
+
+        // R1: input to mid
+        V(inp, mid) <+ r1 * I(inp, mid);
+
+        // C1: mid to ground
+        I(mid) <+ c1 * ddt(V(mid));
+
+        // Output = mid node
+        V(vctrl) <+ V(mid);
+    end
+endmodule

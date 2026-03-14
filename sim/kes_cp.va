@@ -1,0 +1,30 @@
+// kes_cp.va — Behavioral charge pump
+//
+// Ideal current source: +Icp when UP high, -Icp when DN high.
+// Soft rail clamps.
+
+`include "disciplines.vams"
+`include "constants.vams"
+
+module kes_cp(up, dn, out);
+    inout  up, dn, out;
+    electrical up, dn, out;
+
+    parameter real icp = 100.0e-6;  // charge pump current (A)
+    parameter real vdd = 1.8;
+    parameter real vth = 0.9;       // switching threshold
+
+    real i_up, i_dn;
+
+    analog begin
+        // Smooth switching with tanh
+        i_up = 0.5 * icp * (1.0 + tanh(20.0 * (V(up) - vth)));
+        i_dn = 0.5 * icp * (1.0 + tanh(20.0 * (V(dn) - vth)));
+
+        I(out) <+ i_dn - i_up;
+
+        // Soft rail clamps
+        I(out) <+ 1e-3 * ln(1.0 + limexp(40.0 * (V(out) - vdd)));
+        I(out) <+ -1e-3 * ln(1.0 + limexp(-40.0 * V(out)));
+    end
+endmodule

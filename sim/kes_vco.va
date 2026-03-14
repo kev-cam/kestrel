@@ -1,0 +1,41 @@
+// kes_vco — Behavioral VCO: Van der Pol relaxation oscillator
+//
+// Self-sustaining oscillation with frequency = kvco * V(vctrl).
+// Uses coupled x,y state variables with cubic nonlinearity.
+// Self-starting: bias on y-node ensures fast startup.
+//
+// All constructs supported by OpenVAF (no transition/cross/idtmod)
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+module kes_vco(vctrl, outp, outn);
+    inout  vctrl, outp, outn;
+    electrical vctrl, outp, outn;
+    electrical x, y;
+
+    parameter real kvco    = 1.0e9;    // Hz/V — VCO gain
+    parameter real vdd     = 1.8;      // V — supply
+    parameter real mu      = 3.0;      // Van der Pol damping (controls squareness)
+
+    real omega;
+
+    analog begin
+        // Angular frequency proportional to control voltage
+        omega = 6.283185307 * kvco * V(vctrl);
+
+        // Van der Pol oscillator (self-sustaining, amplitude ≈ 2)
+        //   dx/dt = omega * y
+        //   dy/dt = omega * (mu*(1 - x^2)*y - x)
+        //
+        // Bias on y ensures fast self-start (breaks x=y=0 equilibrium)
+        // Once oscillating, 0.01 offset is negligible vs amplitude ≈ 2
+
+        I(x) <+ ddt(V(x)) - omega * V(y);
+        I(y) <+ ddt(V(y)) - omega * (mu * (1.0 - V(x)*V(x)) * V(y) - V(x) + 0.01);
+
+        // Output: scale to rail-to-rail (x swings ≈ ±2)
+        V(outp) <+ 0.5 * vdd * (1.0 + tanh(5.0 * V(x)));
+        V(outn) <+ vdd - V(outp);
+    end
+endmodule
