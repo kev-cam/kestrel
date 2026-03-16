@@ -1,0 +1,90 @@
+# VCO optimization configuration
+# Tweak transistor sizing to match behavioral frequency vs Vctrl curve
+
+# --- Target curve ---
+# Use the transistor-level achievable range only.
+# The Maneatis topology oscillates over Vctrl ≈ 0.6–1.2V;
+# outside that range the symmetric load either clamps the output
+# (low Vctrl) or the Vctrl PFET is fully off (high Vctrl → saturation).
+# These targets should come from the transistor-level best-fit,
+# NOT from the behavioral model (which will be refit to match).
+target:
+  # Vctrl (V) : frequency (Hz)
+  points:
+    0.7:  476.6e6
+    0.8:  650.0e6
+    0.9:  771.7e6
+    1.0:  772.1e6
+    1.1:  776.8e6
+
+# --- Design variables ---
+# Each variable: initial value, min, max, unit
+# Min/max must respect model bin boundaries
+variables:
+  W_tail:
+    init:  40.0e-6
+    min:    7.0e-6
+    max:   99.0e-6
+    desc: "Tail current source NFET width"
+
+  W_diff:
+    init:  20.0e-6
+    min:    7.0e-6
+    max:   99.0e-6
+    desc: "Differential pair NFET width"
+
+  W_pfet_diode:
+    init:  10.0e-6
+    min:    7.0e-6
+    max:   99.0e-6
+    desc: "Diode-connected PFET load width"
+
+  W_pfet_ctrl:
+    init:  10.0e-6
+    min:    7.0e-6
+    max:   99.0e-6
+    desc: "Vctrl-controlled PFET load width"
+
+  W_bias_n:
+    init:  20.0e-6
+    min:    7.0e-6
+    max:   99.0e-6
+    desc: "Bias replica NFET width"
+
+  I_start:
+    init:   5.0e-6
+    min:    0.5e-6
+    max:   50.0e-6
+    desc: "Bias startup current"
+
+# --- Simulator backend ---
+simulator:
+  tool: xyce            # xyce | spectre | ngspice
+  binary: Xyce          # path or command name
+  sim_time: 500e-9      # transient sim length
+  meas_td: 50e-9        # measurement delay (skip startup)
+  meas_rise_a: 3        # RISE count for t1
+  meas_rise_b: 4        # RISE count for t2
+
+# --- Extraction backend (optional) ---
+# Set tool: none to skip extraction (schematic-level sim)
+extraction:
+  tool: none            # none | calibre | magic | quantus
+  # calibre:
+  #   rules_file: /path/to/sky130.rules
+  #   gds_file: /path/to/vco.gds
+  # magic:
+  #   tech_file: /path/to/sky130A.tech
+
+# --- Optimizer settings ---
+optimizer:
+  method: nelder-mead   # nelder-mead | powell | cobyla | differential-evolution
+  max_iter: 200
+  ftol: 1.0e-3          # relative cost tolerance
+  cost: mse_relative    # mse_relative | mse_absolute | max_relative
+  penalty_no_osc: 1.0e6 # cost penalty when VCO fails to oscillate
+
+# --- Output ---
+output:
+  log_file: opt/opt_log.csv
+  best_netlist: opt/best_vco.cir

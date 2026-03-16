@@ -1,0 +1,132 @@
+* Kestrel VCO — Transistor-level range characterization (Xyce)
+*
+* 4-stage differential Maneatis ring oscillator
+* Sweep Vctrl from 0.3V to 1.5V, measure oscillation frequency
+*
+
+**********************************************************************
+* Process models
+**********************************************************************
+* Mismatch/statistics params (TT corner: all zero, but Xyce requires definition)
+* NFET slope params
+.PARAM sky130_fd_pr__nfet_01v8__toxe_slope = 0.0
+.PARAM sky130_fd_pr__nfet_01v8__vth0_slope = 0.0
+.PARAM sky130_fd_pr__nfet_01v8__voff_slope = 0.0
+.PARAM sky130_fd_pr__nfet_01v8__vth0_slope1 = 0.0
+* PFET slope params
+.PARAM sky130_fd_pr__pfet_01v8__toxe_slope = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__vth0_slope = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__voff_slope = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__nfactor_slope = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__toxe_slope1 = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__vth0_slope1 = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__voff_slope1 = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__nfactor_slope1 = 0.0
+* PFET LOD/well-proximity diff params
+.PARAM sky130_fd_pr__pfet_01v8__wlod_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__kvth0_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__ku0_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__kvsat_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__lkvth0_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__wkvth0_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__lku0_diff = 0.0
+.PARAM sky130_fd_pr__pfet_01v8__wku0_diff = 0.0
+
+.INCLUDE "models/sky130_nfet_xyce.spice"
+.INCLUDE "models/sky130_pfet_xyce.spice"
+
+**********************************************************************
+* VCO subcircuits
+**********************************************************************
+
+* Maneatis delay cell — differential pair + symmetric load
+.SUBCKT kestrel_delay_cell outp outn inp inn vctrl vbn vdd vss
+
+* Tail current source (bin 6: L=[250n,500n] W=[7u,100u])
+Mtail  tail  vbn  vss  vss  sky130_fd_pr__nfet_01v8__model.6 W=40u L=0.360u
+
+* Differential pair (bin 6) — sized for gm > gm_load to ensure oscillation
+Mn1    outn  inp  tail vss  sky130_fd_pr__nfet_01v8__model.6 W=20u L=0.360u
+Mn2    outp  inn  tail vss  sky130_fd_pr__nfet_01v8__model.6 W=20u L=0.360u
+
+* Symmetric load (Maneatis) (bin 6) — reduced for better gain margin
+Mp1a   outn  outn vdd  vdd  sky130_fd_pr__pfet_01v8__model.6 W=10u L=0.360u
+Mp1b   outn  vctrl vdd vdd  sky130_fd_pr__pfet_01v8__model.6 W=10u L=0.360u
+Mp2a   outp  outp vdd  vdd  sky130_fd_pr__pfet_01v8__model.6 W=10u L=0.360u
+Mp2b   outp  vctrl vdd vdd  sky130_fd_pr__pfet_01v8__model.6 W=10u L=0.360u
+
+.ENDS kestrel_delay_cell
+
+* Self-biased replica bias generator (Maneatis)
+* vbn is the replica output — negative feedback loop:
+*   vbn up → more tail current → replica output drops → vbn drops
+* Replica mirrors one half of the delay cell (diode + Vctrl PFET loads)
+.SUBCKT kestrel_vco_bias vbn vctrl vdd vss
+
+* Diode NFET — mirrors tail current (half of Mtail since replica = one diff side)
+Mrep_n   vbn  vbn  vss  vss  sky130_fd_pr__nfet_01v8__model.6 W=20u L=0.360u
+* Diode PFET load (matches Mp1a/Mp2a in delay cell)
+Mrep_pd  vbn  vbn  vdd  vdd  sky130_fd_pr__pfet_01v8__model.6 W=10u L=0.360u
+* Vctrl-controlled PFET load (matches Mp1b/Mp2b in delay cell)
+Mrep_pc  vbn  vctrl vdd vdd  sky130_fd_pr__pfet_01v8__model.6 W=10u L=0.360u
+* Startup current to avoid degenerate vbn=0 solution
+Istart vdd vbn 5u
+
+.ENDS kestrel_vco_bias
+
+* Ring oscillator VCO — 4-stage differential
+.SUBCKT kestrel_vco outp outn vctrl_ext vdd vss
+
+Xbias vbn vctrl_int vdd vss kestrel_vco_bias
+Rsw vctrl_ext vctrl 1
+Rbias vctrl_int vctrl 100k
+
+Xstage0 dp_0 dn_0 dn_3 dp_3 vctrl vbn vdd vss kestrel_delay_cell
+Xstage1 dp_1 dn_1 dp_0 dn_0 vctrl vbn vdd vss kestrel_delay_cell
+Xstage2 dp_2 dn_2 dp_1 dn_1 vctrl vbn vdd vss kestrel_delay_cell
+Xstage3 dp_3 dn_3 dp_2 dn_2 vctrl vbn vdd vss kestrel_delay_cell
+
+Routp dp_3 outp 1
+Routn dn_3 outn 1
+
+.ENDS kestrel_vco
+
+**********************************************************************
+* Testbench
+**********************************************************************
+Vdd vdd 0 1.8
+Vss vss 0 0
+
+* Sweep control voltage via .STEP
+Vctrl vctrl 0 {vctrl_val}
+.PARAM vctrl_val = 0.9
+
+Xvco outp outn vctrl vdd vss kestrel_vco
+
+* Small cap load
+Cload_p outp 0 10f
+Cload_n outn 0 10f
+
+* Differential output for frequency measurement
+Ediff diff 0 outp outn 1.0
+
+* Startup kick — inject asymmetric current to break symmetry
+Ikick 0 Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
+
+**********************************************************************
+* Transient analysis
+**********************************************************************
+.TRAN 50p 500n
+
+* Print output waveform + bias voltage
+.PRINT TRAN V(outp) V(outn) V(vctrl) V(Xvco:vbn) V(diff)
+
+* Measure frequency from differential zero crossings (works at any common mode)
+.MEASURE TRAN t1 WHEN V(diff)=0 RISE=3 TD=50n
+.MEASURE TRAN t2 WHEN V(diff)=0 RISE=4 TD=50n
+* f_vco = 1/(t2-t1), computed from measure output file
+
+* Step Vctrl for range sweep
+.STEP vctrl_val 0.3 1.5 0.1
+
+.END
