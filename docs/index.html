@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kestrel &mdash; Open-Source PLL Generator</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --bg2: #16213e;
+    --fg: #e0e0e0;
+    --fg2: #a0a0b0;
+    --accent: #0f9b8e;
+    --accent2: #53c0b4;
+    --border: #2a2a4a;
+    --code-bg: #0f0f23;
+    --done: #4caf50;
+    --todo: #ff9800;
+    --warn: #f44336;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+  h1 { color: var(--accent2); font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { color: var(--accent); font-size: 1.4rem; margin-top: 2.5rem; margin-bottom: 0.75rem;
+       border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+  h3 { color: var(--fg); font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+  p { margin-bottom: 0.75rem; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .subtitle { color: var(--fg2); font-size: 1.05rem; margin-bottom: 2rem; }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    background: var(--code-bg);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.75rem 0;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+  th { background: var(--bg2); color: var(--accent2); font-weight: 600; }
+  tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+  .tag {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .done { background: rgba(76,175,80,0.2); color: var(--done); }
+  .todo { background: rgba(255,152,0,0.2); color: var(--todo); }
+  .stub { background: rgba(244,67,54,0.15); color: #e57373; }
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin: 0.75rem 0;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    white-space: pre;
+    overflow-x: auto;
+    line-height: 1.4;
+  }
+  details { margin: 0.5rem 0; }
+  summary {
+    cursor: pointer;
+    color: var(--accent2);
+    font-weight: 600;
+    padding: 0.25rem 0;
+  }
+  summary:hover { text-decoration: underline; }
+  .links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+  .links a {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.85rem;
+  }
+  .links a:hover { border-color: var(--accent); background: rgba(15,155,142,0.1); }
+  nav { margin-bottom: 2rem; }
+  nav a { margin-right: 1.5rem; font-size: 0.9rem; }
+  .result-table td:nth-child(2),
+  .result-table td:nth-child(3) { text-align: right; font-family: monospace; }
+</style>
+</head>
+<body>
+
+<h1>Kestrel</h1>
+<p class="subtitle">Open-source PLL generator &mdash; specs in, silicon out</p>
+
+<nav>
+  <a href="#overview">Overview</a>
+  <a href="#quickstart">Quick Start</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#sim">Simulation</a>
+  <a href="#opt">Optimization</a>
+  <a href="#results">Results</a>
+  <a href="#status">Status</a>
+  <a href="#refs">References</a>
+</nav>
+
+<!-- ================================================================ -->
+<h2 id="overview">Overview</h2>
+
+<p>Kestrel generates Phase-Locked Loop designs from a high-level specification.
+Given a target frequency range, jitter budget, loop bandwidth, and process node,
+it emits parametrically consistent Verilog-AMS models, SPICE netlists, KiCad
+schematics, and testbenches.</p>
+
+<p>The PLL topology is the <strong>Maneatis self-biased charge-pump PLL</strong>
+(US5727038, expired 2015), featuring a 4-stage differential ring oscillator
+with replica-biased symmetric load delay cells.</p>
+
+<div class="card">
+<h3>What Kestrel produces today</h3>
+<table>
+<tr><th>Output</th><th>Tool</th><th>Status</th></tr>
+<tr><td>Verilog-AMS behavioral model</td><td>&mdash;</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>SPICE transistor-level netlist</td><td>Xyce, ngspice</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>Behavioral PLL testbench</td><td>ngspice + OSDI</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>Transistor-level VCO testbench</td><td>Xyce + sky130</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>KiCad schematic</td><td>KiCad 10</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>VCO sizing optimization</td><td>SciPy + Xyce</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>GDS/OASIS layout</td><td>gdsfactory</td><td><span class="tag todo">Planned</span></td></tr>
+</table>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="quickstart">Quick Start</h2>
+
+<h3>Command line</h3>
+<pre>
+# Generate a 1 GHz PLL on SkyWater 130nm
+kestrel gen \
+  --freq-min 500M --freq-max 1.5G \
+  --jitter 2ps --loop-bw 5M \
+  --ref-freq 50M --process sky130 \
+  --output ./my_pll/
+
+# Interactive GUI
+kestrel gui --process sky130
+</pre>
+
+<h3>Run the behavioral PLL simulation</h3>
+<pre>
+cd sim
+
+# Compile Verilog-A models to OSDI (one-time)
+openvaf kes_vco.va --output kes_vco.osdi
+openvaf kes_cp.va  --output kes_cp.osdi
+openvaf kes_lf.va  --output kes_lf.osdi
+
+# Run behavioral PLL
+ngspice kes_run_beh.sp
+</pre>
+
+<h3>Run the transistor-level VCO</h3>
+<pre>
+cd sim
+Xyce kes_vco_xyce.cir    # Sweeps Vctrl 0.3&ndash;1.5 V, measures frequency
+</pre>
+
+<h3>Run VCO optimization</h3>
+<pre>
+cd sim
+python3 opt/optimize_vco.py --max-iter 100 --refit
+</pre>
+
+<!-- ================================================================ -->
+<h2 id="architecture">Architecture</h2>
+
+<h3>PLL Block Diagram</h3>
+<div class="diagram">
+  ref_clk ──► PFD ──► Charge ──► Loop ──► VCO ──► Output
+               │       Pump       Filter     │
+               │                              │
+               ◄──────── Divider ◄────────────┘
+</div>
+
+<h3>Maneatis Delay Cell</h3>
+<p>The core VCO building block. Each output has a diode-connected PFET (sets
+common mode) and a Vctrl-gated PFET (variable conductance for frequency control).
+The self-biased replica adjusts the tail current to track Vctrl.</p>
+
+<div class="diagram">
+            VDD                         VDD
+     ┌───────┴───────┐          ┌───────┴───────┐
+   Mp1a    Mp1b    Mp2a    Mp2b
+  (diode) (vctrl) (diode) (vctrl)
+     │       │       │       │
+     ├───────┤       ├───────┤
+     outn             outp
+     │                 │
+   Mn1(inp)         Mn2(inn)
+     │                 │
+     └────────┬────────┘
+            tail
+              │
+          Mtail(vbn)
+              │
+             VSS
+</div>
+
+<h3>Design Engine</h3>
+<p>The engine (<code>kestrel/design/engine.py</code>) computes all PLL parameters
+analytically from the user specification:</p>
+<ul>
+  <li>Divider ratio from frequency range and reference clock</li>
+  <li>VCO Kvco from frequency range and control voltage swing</li>
+  <li>Charge pump current (50&ndash;200 &micro;A, scaled by frequency)</li>
+  <li>Loop filter R, C1, C2 via Gardner's method for target bandwidth and phase margin</li>
+  <li>All transistor W/L sizing using square-law MOSFET equations</li>
+  <li>Jitter estimation from thermal noise model</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2 id="sim">Simulation</h2>
+
+<div class="grid">
+<div class="card">
+<h3>Behavioral (ngspice)</h3>
+<p>Uses OSDI-compiled Verilog-A models for VCO, charge pump, and loop filter.
+PFD and divider use XSPICE digital primitives (d_dff, d_and, adc/dac_bridge).</p>
+<p>The VCO is a Van der Pol oscillator with <code>f = kvco * V(vctrl)</code>.
+Self-starting via asymmetric bias term. Compiled from
+<code>kes_vco.va</code> with OpenVAF.</p>
+<p><strong>Files:</strong><br>
+<code>sim/kes_run_beh.sp</code> (launcher)<br>
+<code>sim/kes_vco.va</code>, <code>kes_cp.va</code>, <code>kes_lf.va</code></p>
+</div>
+<div class="card">
+<h3>Transistor-level (Xyce)</h3>
+<p>4-stage differential Maneatis ring on sky130 BSIM4 binned models.
+Uses <code>.STEP</code> parameter sweep over Vctrl with
+<code>.MEASURE</code> for frequency extraction via differential zero-crossing.</p>
+<p>Sky130 models: stripped subcircuit wrappers, direct bin references
+(bin 6 for L=0.36u W&ge;7u devices).</p>
+<p><strong>Files:</strong><br>
+<code>sim/kes_vco_xyce.cir</code><br>
+<code>sim/models/sky130_*_xyce.spice</code></p>
+</div>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="opt">Optimization Framework</h2>
+
+<p>The <code>sim/opt/</code> directory implements a complete sizing optimization loop.</p>
+
+<div class="diagram">
+  Design Variables ──► Netlist Gen ──► [Extraction] ──► Simulate ──► Measure
+        ▲                                                               │
+        │                                                               ▼
+        └────────────────── Optimizer (SciPy) ◄──────────────── Cost Function
+</div>
+
+<h3>Design Variables</h3>
+<table>
+<tr><th>Variable</th><th>Description</th><th>Range</th></tr>
+<tr><td><code>W_tail</code></td><td>Tail current source NFET</td><td>7&ndash;99 &micro;m</td></tr>
+<tr><td><code>W_diff</code></td><td>Differential pair NFET</td><td>7&ndash;99 &micro;m</td></tr>
+<tr><td><code>W_pfet_diode</code></td><td>Diode-connected PFET load</td><td>7&ndash;99 &micro;m</td></tr>
+<tr><td><code>W_pfet_ctrl</code></td><td>Vctrl-controlled PFET load</td><td>7&ndash;99 &micro;m</td></tr>
+<tr><td><code>W_bias_n</code></td><td>Bias replica NFET</td><td>7&ndash;99 &micro;m</td></tr>
+<tr><td><code>I_start</code></td><td>Bias startup current</td><td>0.5&ndash;50 &micro;A</td></tr>
+</table>
+
+<h3>Pluggable Backends</h3>
+<p>Subclass <code>SimulatorBackend</code> or <code>ExtractorBackend</code> in
+<code>backends.py</code> to add new tools.</p>
+
+<div class="grid">
+<div class="card">
+<h3>Simulators</h3>
+<table>
+<tr><td>Xyce</td><td><span class="tag done">Working</span></td></tr>
+<tr><td>Spectre</td><td><span class="tag stub">Stub</span></td></tr>
+</table>
+</div>
+<div class="card">
+<h3>Extractors</h3>
+<table>
+<tr><td>None (schematic)</td><td><span class="tag done">Working</span></td></tr>
+<tr><td>Calibre xRC</td><td><span class="tag stub">Stub</span></td></tr>
+<tr><td>Magic</td><td><span class="tag stub">Stub</span></td></tr>
+<tr><td>Quantus QRC</td><td><span class="tag stub">Stub</span></td></tr>
+</table>
+</div>
+</div>
+
+<h3>Refit</h3>
+<p>After optimization, <code>--refit</code> fits a polynomial
+<code>f(Vctrl) = a<sub>3</sub>V<sup>3</sup> + a<sub>2</sub>V<sup>2</sup> + a<sub>1</sub>V + a<sub>0</sub></code>
+to the transistor-level data and generates an updated Verilog-A behavioral model
+(<code>opt/kes_vco_refit.va</code>) that matches the layout exactly.</p>
+
+<!-- ================================================================ -->
+<h2 id="results">Results</h2>
+
+<h3>VCO Frequency vs. Vctrl</h3>
+<table class="result-table">
+<tr><th>Vctrl (V)</th><th>Behavioral (MHz)</th><th>Transistor (MHz)</th></tr>
+<tr><td>0.3</td><td>211</td><td>&mdash;</td></tr>
+<tr><td>0.5</td><td>354</td><td>&mdash;</td></tr>
+<tr><td>0.7</td><td>493</td><td>477</td></tr>
+<tr><td>0.9</td><td>635</td><td>772</td></tr>
+<tr><td>1.0</td><td>705</td><td>772</td></tr>
+<tr><td>1.1</td><td>776</td><td>777</td></tr>
+<tr><td>1.3</td><td>917</td><td>777</td></tr>
+<tr><td>1.5</td><td>1056</td><td>789</td></tr>
+</table>
+
+<div class="card">
+<h3>Key Observations</h3>
+<ul>
+<li>Behavioral model: linear Kvco &asymp; 707 MHz/V across 0.1&ndash;1.5 V</li>
+<li>Transistor level: Kvco &asymp; 298 MHz/V, valid only 0.7&ndash;1.1 V</li>
+<li>Frequency saturates above Vctrl &asymp; 1.0 V (Vctrl PFET fully off)</li>
+<li>No oscillation below 0.7 V (PFET load overwhelms diff pair)</li>
+<li>Refit polynomial matches transistor curve within &plusmn;3.3%</li>
+<li>Optimization: 112 evaluations, cost 0.363 &rarr; 0.249</li>
+</ul>
+</div>
+
+<h3>Optimized Transistor Sizing (sky130, L=0.36&micro;m, bin 6)</h3>
+<table>
+<tr><th>Device</th><th>Initial W</th><th>Optimized W</th></tr>
+<tr><td>Mtail (tail current)</td><td>40 &micro;m</td><td>39.8 &micro;m</td></tr>
+<tr><td>Mn1/Mn2 (diff pair)</td><td>20 &micro;m</td><td>9.9 &micro;m</td></tr>
+<tr><td>Mp_diode (load)</td><td>10 &micro;m</td><td>15.3 &micro;m</td></tr>
+<tr><td>Mp_ctrl (Vctrl load)</td><td>10 &micro;m</td><td>9.0 &micro;m</td></tr>
+<tr><td>Mrep_n (bias)</td><td>20 &micro;m</td><td>19.5 &micro;m</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="status">Project Status</h2>
+
+<table>
+<tr><th>Milestone</th><th>Description</th><th>Status</th></tr>
+<tr><td>M1</td><td>Design engine, CLI, model emitters</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>M2</td><td>Behavioral PLL simulation (ngspice/OSDI)</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>M3</td><td>Transistor VCO + optimization (Xyce/sky130)</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>M4</td><td>Layout generation + extraction loop</td><td><span class="tag todo">Next</span></td></tr>
+<tr><td>M5</td><td>LC-VCO option (ASITIC + RapidPassives)</td><td><span class="tag todo">Planned</span></td></tr>
+<tr><td>M6</td><td>Polish, packaging, examples</td><td><span class="tag todo">Planned</span></td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="refs">References &amp; Links</h2>
+
+<h3>External Tools</h3>
+<div class="links">
+  <a href="https://github.com/google/skywater-pdk">SkyWater SKY130 PDK</a>
+  <a href="https://xyce.sandia.gov/">Xyce (Sandia)</a>
+  <a href="https://ngspice.sourceforge.io/">ngspice</a>
+  <a href="https://openvaf.semimod.de/">OpenVAF</a>
+  <a href="https://www.kicad.org/">KiCad</a>
+  <a href="https://gdsfactory.github.io/gdsfactory/">gdsfactory</a>
+  <a href="https://scipy.org/">SciPy</a>
+</div>
+
+<h3>LC-VCO Tools (future)</h3>
+<div class="links">
+  <a href="http://rfic.eecs.berkeley.edu/~niknejad/asitic.html">ASITIC (Berkeley)</a>
+  <a href="https://github.com/milanofthe/rapidpassives">RapidPassives</a>
+  <a href="https://github.com/VolkerMuehlhaus/RFIC-Inductor-Toolkit-Open">M&uuml;hlhaus Inductor Toolkit</a>
+  <a href="https://www.fastfieldsolvers.com/">FastHenry / FastCap</a>
+  <a href="https://openems.de/">OpenEMS</a>
+</div>
+
+<h3>Key Papers</h3>
+<ul>
+  <li>J. Maneatis, "Low-jitter process-independent DLL and PLL based on self-biased techniques," <em>JSSC</em>, Nov 1996.</li>
+  <li>J. Maneatis and M. Horowitz, "Precise delay generation using coupled oscillators," <em>JSSC</em>, Dec 1993.</li>
+  <li>B. Razavi, <em>Design of Analog CMOS Integrated Circuits</em>, Ch. 15.</li>
+  <li>T. H. Lee, <em>The Design of CMOS Radio-Frequency Integrated Circuits</em>, Ch. 17&ndash;18.</li>
+</ul>
+
+<h3>Patent Status</h3>
+<p>The Maneatis self-biased PLL architecture is covered by
+<a href="https://patents.google.com/patent/US5727038A">US5727038</a> (filed 1995, expired 2015)
+and <a href="https://patents.google.com/patent/US5736892A">US5736892</a> (expired 2015).
+See <code>Expired-Patents.csv</code> for the complete patent expiry reference.</p>
+
+<hr style="margin-top: 3rem; border-color: var(--border);">
+<p style="color: var(--fg2); font-size: 0.8rem; margin-top: 1rem;">
+  Kestrel &mdash; Apache 2.0 License &mdash;
+  <a href="https://github.com/kev-cam/kestrel">github.com/kev-cam/kestrel</a>
+</p>
+
+</body>
+</html>

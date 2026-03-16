@@ -1,39 +1,92 @@
 # Kestrel — Open-Source PLL Generator
 
-**Parametric PLL synthesis: specs in, layout + behavioral model + SPICE out.**
+**Parametric PLL synthesis: specs in, behavioral model + SPICE + schematic out.**
 
-Kestrel generates production-quality Phase-Locked Loop designs from a high-level
-specification. Given target frequency range, jitter budget, loop bandwidth, and
-process node, Kestrel emits:
+Kestrel generates Phase-Locked Loop designs from a high-level specification.
+Given target frequency range, jitter budget, loop bandwidth, and process node,
+Kestrel emits:
 
-- GDS/OASIS layout (via gdsfactory + KLayout)
 - Verilog-AMS behavioral model
-- SV-RNM behavioral model
-- SPICE netlist (targeting Xyce and ngspice)
-- PSL/SVA assertions for functional verification
-- Probability waveform jitter model (statistical timing)
+- SPICE netlist (targeting Xyce, ngspice, Spectre)
+- KiCad schematic
+- Behavioral PLL testbench (ngspice/OSDI)
+- Transistor-level VCO testbench (Xyce + sky130 BSIM4)
 
-All outputs are parameterically consistent — the same computed component values
+All outputs are parametrically consistent — the same computed component values
 drive every representation.
+
+## Current Status (March 2026)
+
+### Working
+
+- **Design engine** (`kestrel/design/engine.py`) — full analytical PLL sizing
+  from specs: divider ratio, VCO gain, charge pump current, loop filter R/C,
+  transistor W/L, phase margin, jitter estimate. Supports sky130 and gf180.
+- **CLI** (`kestrel/cli.py`) — `kestrel gen` and `kestrel gui` subcommands.
+- **Tkinter GUI** (`kestrel/gui.py`) — interactive spec entry and generation.
+- **Verilog-AMS emitter** (`kestrel/models/verilog_ams.py`) — generates VCO,
+  PFD, charge pump, loop filter, divider modules.
+- **SPICE netlist emitter** (`kestrel/models/spice.py`) — full transistor-level
+  netlist for all PLL blocks with testbench.
+- **Behavioral emitter** (`kestrel/models/behavioral.py`) — template-based
+  behavioral SPICE output.
+- **KiCad schematic emitter** (`kestrel/models/schematic.py`) — SVG and
+  KiCad S-expression output.
+- **Behavioral VCO model** (`sim/kes_vco.va`) — Van der Pol oscillator in
+  Verilog-A, compiled to OSDI for ngspice. Self-starting, frequency
+  proportional to V(vctrl).
+- **Behavioral PLL testbench** (`sim/kes_run_beh.sp`) — full PLL loop in
+  ngspice using OSDI models (VCO, charge pump, loop filter) + XSPICE
+  digital (PFD, divider). Locks to reference.
+- **Transistor-level VCO** (`sim/kes_vco_xyce.cir`) — 4-stage differential
+  Maneatis ring oscillator on sky130 BSIM4 models. Runs in Xyce with
+  `.STEP` parameter sweep.
+- **VCO optimization framework** (`sim/opt/`) — Nelder-Mead sizing
+  optimization with pluggable simulator (Xyce, Spectre) and extraction
+  (Calibre, Magic, Quantus) backends. Refits behavioral model polynomial
+  to match transistor-level data.
+- **VCO range characterization** (`sim/vco_range.sh`) — automated
+  frequency-vs-Vctrl sweep for behavioral model.
+- **KiCad VCO schematic** (`sch/kes_vco_delay_cell.kicad_sch`) —
+  Maneatis delay cell with NMOS/PMOS symbols, generated programmatically.
+
+### Key Results
+
+| Metric | Behavioral | Transistor (sky130) |
+|--------|-----------|---------------------|
+| VCO range | 71–1056 MHz | 477–789 MHz |
+| Kvco | ~707 MHz/V (linear) | ~298 MHz/V (saturating) |
+| Valid Vctrl | 0.1–1.5 V | 0.7–1.5 V |
+| Simulator | ngspice + OSDI | Xyce |
+
+Optimization converged in 112 evaluations (cost 0.363 → 0.249).
+Refit behavioral model matches transistor curve within ±3.3%.
+
+### Not Yet Implemented
+
+- GDS/OASIS layout generation (planned: gdsfactory)
+- SV-RNM behavioral model
+- PSL/SVA assertions
+- Probability waveform jitter model
+- LVS / DRC automation
+- LC-VCO path (inductor design, see Appendix A)
 
 ## Architecture
 
 The PLL topology is the Maneatis self-biased charge-pump PLL, whose foundational
-patents have expired. This architecture offers wide frequency range, low jitter,
-and inherent self-biasing that simplifies the generator — the bias point is set by
-the circuit topology, not by external tuning.
+patents have expired (US5727038, US5736892). This architecture offers wide
+frequency range, low jitter, and inherent self-biasing.
 
 ### Core Blocks
 
-| Block              | Description                                        |
-|--------------------|----------------------------------------------------|
-| VCO                | Differential ring oscillator, N stages configurable|
-| Charge Pump        | Symmetric up/down with current matching             |
-| Phase/Freq Detector| Standard tri-state PFD with dead-zone elimination   |
-| Loop Filter        | On-chip R-C, second or third order                  |
-| Frequency Divider  | Programmable integer-N, optional fractional-N ΔΣ    |
-| Bias Generator     | Self-biased replica feedback (Maneatis technique)   |
-| Output Buffers     | Configurable fan-out, optional differential         |
+| Block              | Description                                        | Status |
+|--------------------|----------------------------------------------------|--------|
+| VCO                | 4-stage differential ring, Maneatis delay cell     | Done   |
+| Charge Pump        | Symmetric up/down with current matching             | Done   |
+| Phase/Freq Detector| Standard tri-state PFD with dead-zone elimination   | Done   |
+| Loop Filter        | On-chip R-C, second order                           | Done   |
+| Frequency Divider  | Programmable integer-N (div-by-64 in testbench)     | Done   |
+| Bias Generator     | Self-biased replica feedback (Maneatis technique)   | Done   |
 
 ### Generator Flow
 
@@ -43,186 +96,104 @@ User Specification (Python dict or command line)
         ▼
 ┌───────────────────┐
 │  Design Engine    │  ← Computes all component values from specs
-│  (analytical +    │     Loop stability analysis (phase margin, bandwidth)
-│   optimization)   │     VCO gain, charge pump current, filter R/C values
+│  (analytical)     │     Loop stability, VCO gain, charge pump, filter R/C
 └───────┬───────────┘
         │
-        ├──────────────────┬──────────────────┬──────────────────┐
-        ▼                  ▼                  ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ Layout Gen   │  │ Verilog-AMS  │  │ SPICE Netlist│  │ Prob Waveform│
-│ (gdsfactory) │  │ + SV-RNM Gen │  │ Generator    │  │ Jitter Model │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                 │                  │
-       ▼                 ▼                 ▼                  ▼
-   .gds/.oas         .vams/.sv          .sp/.cir           .pwm
+        ├──────────────────┬──────────────────┐
+        ▼                  ▼                  ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Verilog-AMS  │  │ SPICE Netlist│  │ KiCad        │
+│ + Behavioral │  │ Generator    │  │ Schematic    │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                 │                  │
+       ▼                 ▼                  ▼
+    .vams/.cir        .sp/.cir          .kicad_sch
 ```
 
-## Supported Process Nodes (Initial)
+### Transistor-Level Verification Flow
 
-### Open PDKs (Day 1)
+```
+Schematic netlist (from design engine)
+        │
+        ▼
+┌───────────────────┐
+│  Xyce / Spectre   │  ← Transient simulation with sky130 BSIM4
+│  .STEP sweep      │     Frequency measurement via zero-crossing
+└───────┬───────────┘
+        │
+        ▼
+┌───────────────────┐
+│  Optimizer        │  ← Nelder-Mead / Powell / differential evolution
+│  (sim/opt/)       │     Cost = MSE(f_target, f_measured)
+└───────┬───────────┘
+        │
+        ├──────────────────┐
+        ▼                  ▼
+┌──────────────┐  ┌──────────────┐
+│ Best sizing  │  │ Refit model  │
+│ (best_vco)   │  │ (polynomial) │
+└──────────────┘  └──────────────┘
+```
 
-- **SkyWater SKY130** — open 130nm, 5-metal, via Google/Efabless
-  shuttle program. Proven silicon path for prototyping.
+## Supported Process Nodes
+
+### Open PDKs
+
+- **SkyWater SKY130** — open 130nm, 5-metal. Sky130 BSIM4 models
+  integrated and tested with Xyce (binned models, TT corner).
 - **GlobalFoundries GF180MCU** — open 180nm MCU process.
-  Good for lower-frequency PLLs and educational use.
+  Supported in design engine; transistor-level sim not yet validated.
 
 ### Commercial PDKs (Roadmap)
 
 The generator is process-independent. Commercial PDK support requires
-the user to supply their own NDA'd PDK files in gdsfactory format.
-
-- TSMC 28nm (N28HPC+)
-- TSMC 16nm FinFET
-- Samsung 14nm
-- GlobalFoundries 22FDX
-- Intel 16
+the user to supply their own NDA'd PDK files.
 
 ## Project Structure
 
 ```
 kestrel/
 ├── kestrel/
-│   ├── __init__.py
-│   ├── cli.py                  # Command-line interface
-│   ├── spec.py                 # Specification parsing and validation
+│   ├── __init__.py              # Package init, version
+│   ├── cli.py                   # Command-line interface (gen, gui)
+│   ├── spec.py                  # SI suffix parsing (parse_freq, parse_time)
+│   ├── gui.py                   # Tkinter interactive GUI
 │   ├── design/
 │   │   ├── __init__.py
-│   │   ├── engine.py           # Top-level design engine
-│   │   ├── vco.py              # VCO sizing and optimization
-│   │   ├── charge_pump.py      # Charge pump sizing
-│   │   ├── pfd.py              # Phase-frequency detector
-│   │   ├── loop_filter.py      # Filter component computation
-│   │   ├── divider.py          # Frequency divider
-│   │   ├── bias.py             # Self-biased replica generator
-│   │   └── stability.py        # Loop stability analysis
-│   ├── layout/
-│   │   ├── __init__.py
-│   │   ├── pll_top.py          # Top-level PLL layout assembly
-│   │   ├── vco_layout.py       # VCO layout generator
-│   │   ├── cp_layout.py        # Charge pump layout
-│   │   ├── pfd_layout.py       # PFD layout
-│   │   ├── filter_layout.py    # Loop filter (MIM/MOM caps, poly res)
-│   │   ├── divider_layout.py   # Divider (standard cells or custom)
-│   │   └── guard_rings.py      # Substrate isolation structures
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── verilog_ams.py      # Verilog-AMS model emitter
-│   │   ├── sv_rnm.py           # SystemVerilog RNM model emitter
-│   │   ├── spice.py            # SPICE netlist emitter
-│   │   ├── prob_waveform.py    # Probability waveform jitter model
-│   │   └── psl_assertions.py   # PSL/SVA property emitter
-│   ├── pdk/
-│   │   ├── __init__.py
-│   │   ├── sky130.py           # SkyWater 130nm device/layer maps
-│   │   ├── gf180.py            # GF 180nm device/layer maps
-│   │   └── template.py         # Template for new PDK bring-up
-│   └── verify/
+│   │   └── engine.py            # PLL design engine (PLLSpec, PLLDesign, design_pll)
+│   └── models/
 │       ├── __init__.py
-│       ├── drc.py              # KLayout DRC runner
-│       ├── lvs.py              # LVS check (netlist vs layout)
-│       └── sim.py              # Xyce/ngspice simulation harness
+│       ├── behavioral.py        # Behavioral SPICE emitter (template-based)
+│       ├── spice.py             # Transistor-level SPICE netlist emitter
+│       ├── verilog_ams.py       # Verilog-AMS model emitter
+│       ├── schematic.py         # SVG / KiCad schematic emitter
+│       └── templates/           # SPICE and KiCad templates
+├── sim/
+│   ├── kes_vco.va               # Van der Pol VCO (Verilog-A / OSDI)
+│   ├── kes_cp.va                # Charge pump (Verilog-A / OSDI)
+│   ├── kes_lf.va                # Loop filter (Verilog-A / OSDI)
+│   ├── kes_run_beh.sp           # Behavioral PLL testbench (ngspice)
+│   ├── kes_tb_beh.sp            # Behavioral PLL netlist
+│   ├── kes_vco_xyce.cir         # Transistor VCO testbench (Xyce + sky130)
+│   ├── vco_range.sh             # VCO range sweep script
+│   ├── models/                  # sky130 BSIM4 model files
+│   └── opt/
+│       ├── optimize_vco.py      # Sizing optimizer (main script)
+│       ├── backends.py          # Pluggable sim/extraction backends
+│       ├── config.yaml          # Optimization configuration
+│       ├── best_vco.cir         # Best-found netlist
+│       ├── kes_vco_refit.va     # Refit behavioral VCO model
+│       └── refit_params.yaml    # Polynomial fit coefficients
+├── sch/
+│   ├── kes_vco_delay_cell.kicad_sch  # VCO delay cell schematic
+│   ├── kes_vco_delay_cell.kicad_pro  # KiCad project
+│   └── gen_delay_cell.py             # Schematic generator script
 ├── tests/
-│   ├── test_design_engine.py
-│   ├── test_sky130_pll.py
-│   ├── test_gf180_pll.py
-│   ├── test_models.py
-│   └── test_stability.py
-├── examples/
-│   ├── sky130_1ghz_pll/        # Complete worked example
-│   ├── gf180_100mhz_pll/
-│   └── serdes_refclk/          # SERDES reference clock generation
+│   └── test_behavioral.py       # Emitter tests
 ├── docs/
-│   ├── theory.md               # PLL design theory and equations
-│   ├── maneatis.md             # Self-biased architecture details
-│   ├── adding_pdk.md           # How to add a new process node
-│   └── verification.md         # Simulation and verification guide
-├── pyproject.toml
-├── LICENSE                     # Apache 2.0
-├── README.md
-└── PLAN.md                     # This file
-```
-
-## Usage
-
-### Command Line
-
-```bash
-# Generate a 1 GHz PLL on SkyWater 130nm
-kestrel gen \
-  --freq-min 500M --freq-max 1.5G \
-  --jitter 2ps \
-  --loop-bw 5M \
-  --ref-freq 50M \
-  --process sky130 \
-  --output ./my_pll/
-
-# Interactive mode
-kestrel interactive --process sky130
-```
-
-### Python API
-
-```python
-from kestrel import PLL
-
-pll = PLL(
-    freq_range=(500e6, 1.5e9),
-    jitter_target=2e-12,
-    loop_bandwidth=5e6,
-    ref_freq=50e6,
-    process="sky130",
-)
-
-# Design and verify
-pll.design()                        # compute all parameters
-pll.check_stability()               # phase margin, gain margin
-pll.estimate_jitter()               # probability waveform analysis
-
-# Generate outputs
-pll.write_gds("my_pll.gds")
-pll.write_verilog_ams("my_pll.vams")
-pll.write_sv_rnm("my_pll.sv")
-pll.write_spice("my_pll.sp")
-pll.write_assertions("my_pll.psl")
-
-# Run verification
-pll.run_drc()                       # KLayout DRC
-pll.run_lvs()                       # layout vs schematic
-pll.run_sim(simulator="xyce")       # transient + jitter analysis
-```
-
-### Interactive Session
-
-```
-$ kestrel interactive --process sky130
-
-Kestrel PLL Generator v0.1.0 — SkyWater SKY130
-
-Target frequency range? 800M 1.2G
-Reference clock? 25M
-Jitter budget? 5ps
-Power budget? 3mW
-
-Designing...
-
-  VCO: 4-stage differential ring, Kvco = 850 MHz/V
-  Charge pump: Icp = 50 uA, symmetric cascode
-  Loop filter: R = 12.4 kΩ, C1 = 28.3 pF, C2 = 2.83 pF
-  Divider: integer-N, range 32-48
-  Phase margin: 62.3°
-  Estimated jitter: 3.8 ps rms (within budget)
-  Estimated power: 2.4 mW (within budget)
-
-Generate? [y/n] y
-
-  ✓ my_pll.gds          (layout, 847 x 523 µm)
-  ✓ my_pll.vams         (Verilog-AMS behavioral)
-  ✓ my_pll.sv           (SV-RNM behavioral)
-  ✓ my_pll.sp           (SPICE netlist, 342 devices)
-  ✓ my_pll.psl          (12 assertions)
-  ✓ DRC clean           (0 violations)
-  ✓ LVS clean           (netlist matches layout)
+│   └── index.html               # Project documentation (browser)
+├── Kestrel-Plan.md              # This file
+└── Expired-Patents.csv          # Patent expiry reference
 ```
 
 ## Design Engine Details
@@ -235,10 +206,43 @@ range while maintaining adequate phase noise. The design engine:
 
 1. Determines the required VCO gain (Kvco) from the frequency range and
    expected control voltage swing.
-2. Selects the number of delay stages (typically 3-5 for the target range).
+2. Selects the number of delay stages (typically 4 for the target range).
 3. Sizes the delay cell transistors for the target current, frequency, and
    output swing.
 4. Computes the symmetric load resistance for self-biasing.
+
+#### Maneatis Delay Cell
+
+```
+        VDD
+    ┌────┴────────────────┴────┐
+    │                          │
+  Mp1a(diode)  Mp1b(vctrl)  Mp2a(diode)  Mp2b(vctrl)
+    │              │          │              │
+    ├──────────────┤          ├──────────────┤
+    │             outn        │             outp
+    │                         │
+  Mn1(inp)                 Mn2(inn)
+    │                         │
+    └────────┬────────────────┘
+           tail
+             │
+          Mtail(vbn)
+             │
+            VSS
+```
+
+The symmetric load (diode PFET + Vctrl-controlled PFET) provides
+voltage-controlled delay with approximately constant output swing.
+The self-biased replica adjusts vbn to track Vctrl, maintaining
+the operating point across the tuning range.
+
+**Transistor-level findings (sky130):**
+- Valid Vctrl range: 0.7–1.5 V (limited by PFET load balance)
+- Frequency saturates above Vctrl ≈ 1.0 V (Vctrl PFET fully off)
+- Effective Kvco ≈ 298 MHz/V in the active range
+- Optimized sizing: W_tail=40u, W_diff=10u, W_pfet_diode=15u,
+  W_pfet_ctrl=9u (all L=0.36u, bin 6)
 
 ### Loop Dynamics
 
@@ -249,66 +253,112 @@ The design engine solves the standard charge-pump PLL transfer function:
 - Reference spur suppression via C2/C1 ratio
 - Lock time estimation from the natural frequency and damping
 
-The loop filter components (R, C1, C2) are computed analytically, then
-optionally refined by numerical optimization against the full nonlinear
-model.
+The loop filter components (R, C1, C2) are computed analytically using
+Gardner's method.
 
 ### Jitter Estimation
 
-Two methods:
+Linear noise analysis — standard phase noise integration from the VCO,
+charge pump, and reference contributions through the closed-loop transfer
+function.
 
-1. **Linear noise analysis** — standard phase noise integration from the
-   VCO, charge pump, and reference contributions through the closed-loop
-   transfer function. Fast, good for initial sizing.
+## VCO Optimization Framework
 
-2. **Probability waveform analysis** — propagates probability distributions
-   through the PLL model per US8478576, capturing the effects of device
-   mismatch, supply noise, and thermal variation. Slower but gives the
-   full statistical jitter distribution, not just rms.
+The `sim/opt/` directory contains a complete optimization loop for matching
+transistor-level VCO behavior to a target curve.
+
+### Usage
+
+```bash
+cd sim
+python3 opt/optimize_vco.py                          # default config
+python3 opt/optimize_vco.py --method powell           # alternative optimizer
+python3 opt/optimize_vco.py --max-iter 200 --refit    # optimize + refit behavioral
+python3 opt/optimize_vco.py --refit-only              # refit from existing log
+```
+
+### Pluggable Backends
+
+**Simulators** — implement `SimulatorBackend` in `backends.py`:
+
+| Backend | Status | Notes |
+|---------|--------|-------|
+| Xyce | Working | sky130 BSIM4, .STEP sweep, .MEASURE |
+| Spectre | Stub | Netlist template + PSF parser framework |
+
+**Extractors** — implement `ExtractorBackend` in `backends.py`:
+
+| Backend | Status | Notes |
+|---------|--------|-------|
+| None | Working | Schematic-level (no extraction) |
+| Calibre | Stub | xRC runset generation |
+| Magic | Stub | TCL script generation |
+| Quantus | Stub | QRC command file generation |
+
+### Configuration
+
+All parameters in `opt/config.yaml`:
+- Target f(Vctrl) curve
+- Design variables with min/max bounds (respecting model bin boundaries)
+- Simulator and extractor selection
+- Optimizer method (nelder-mead, powell, cobyla, differential-evolution)
+- Cost function (mse_relative, mse_absolute, max_relative)
 
 ## Dependencies
 
-- **gdsfactory** (≥9.0) — layout generation and GDS output
-- **KLayout** — DRC, LVS, layout viewing
-- **NumPy/SciPy** — numerical computation
-- **Xyce** (optional) — SPICE simulation
-- **ngspice** (optional) — alternative SPICE simulation
-- **NVC** (optional) — VHDL simulation of generated models
+- **NumPy / SciPy** — numerical computation, optimization
+- **PyYAML** — configuration files
+- **Xyce** (optional) — transistor-level SPICE simulation
+- **ngspice** (optional) — behavioral SPICE simulation
+- **OpenVAF** (optional) — compile Verilog-A to OSDI for ngspice
+- **KiCad** (optional) — schematic viewing and export
 
 ## Milestones
 
-### M1: Design Engine (Month 1)
+### M1: Design Engine — DONE
 
-- Analytical PLL design from specs
-- Loop stability analysis
-- Jitter estimation (linear)
-- Verilog-AMS and SPICE netlist output
-- Unit tests against known-good PLL designs from literature
+- [x] Analytical PLL design from specs
+- [x] Loop stability analysis (phase margin)
+- [x] Jitter estimation (linear)
+- [x] Verilog-AMS and SPICE netlist output
+- [x] CLI and GUI
 
-### M2: SkyWater 130nm Layout (Month 2)
+### M2: Behavioral Simulation — DONE
 
-- VCO layout generator
-- Charge pump layout
-- PFD (standard cells from Sky130 PDK)
-- Loop filter (MIM caps + poly resistors)
-- Top-level assembly with guard rings
-- DRC clean on Sky130
+- [x] Van der Pol VCO in Verilog-A (ngspice/OSDI)
+- [x] Charge pump and loop filter Verilog-A models
+- [x] Full PLL behavioral testbench (circbyline + XSPICE digital)
+- [x] VCO range characterization script
 
-### M3: Verification and GF180 (Month 3)
+### M3: Transistor-Level VCO — DONE
 
-- LVS passing (netlist matches layout)
-- Xyce simulation of extracted netlist
-- Probability waveform jitter analysis
-- GF180MCU PDK support
-- SV-RNM model output
+- [x] Xyce testbench with sky130 BSIM4 binned models
+- [x] Maneatis delay cell + self-biased replica
+- [x] Sizing optimization framework (Nelder-Mead)
+- [x] Behavioral model refit to match transistor curve
+- [x] KiCad schematic (delay cell)
 
-### M4: Polish and Release (Month 4)
+### M4: Layout and Extraction — TODO
 
-- Interactive CLI
-- Documentation and tutorials
-- Complete worked examples with simulation results
-- Comparison against published TCI Ultra PLL specs
-- GitHub release, announce at OCP / Chiplet Summit
+- [ ] gdsfactory layout generators (VCO, CP, PFD, filter)
+- [ ] DRC clean on sky130
+- [ ] LVS passing
+- [ ] Extraction-in-the-loop optimization (Calibre or Magic)
+
+### M5: LC-VCO Option — TODO
+
+- [ ] ASITIC inductor design integration
+- [ ] RapidPassives GDS generation
+- [ ] Cross-coupled pair + varactor bank layout
+- [ ] FastHenry verification loop
+
+### M6: Polish — TODO
+
+- [ ] Complete worked examples
+- [ ] SV-RNM behavioral model
+- [ ] PSL/SVA assertions
+- [ ] Probability waveform jitter analysis
+- [ ] pyproject.toml packaging
 
 ## Relationship to Cameron EDA Platform
 
@@ -325,14 +375,12 @@ chiplet simulation and synthesis platform:
   for the link protocol FSM.
 - **Smart SERDES** (US12206442B2) — Kestrel provides the system reference
   clock; Smart SERDES eliminates the per-lane CDR PLL entirely.
-- **OAE cell synthesis** — Shannon Slot timing derived from Kestrel's
-  reference clock output.
 
 ## License
 
 Apache 2.0 — use it, modify it, ship it. Attribution appreciated.
 
-## Prior Art and References
+## References
 
 - J. Maneatis, "Low-jitter process-independent DLL and PLL based on
   self-biased techniques," JSSC, Nov 1996.
@@ -342,6 +390,9 @@ Apache 2.0 — use it, modify it, ship it. Attribution appreciated.
 - SkyWater SKY130 PDK: https://github.com/google/skywater-pdk
 - GF180MCU PDK: https://github.com/google/gf180mcu-pdk
 - gdsfactory: https://github.com/gdsfactory/gdsfactory
+- ASITIC: http://rfic.eecs.berkeley.edu/~niknejad/asitic.html
+- RapidPassives: https://github.com/milanofthe/rapidpassives
+- OpenEMS: https://openems.de/
 
 ---
 
@@ -350,14 +401,12 @@ Apache 2.0 — use it, modify it, ship it. Attribution appreciated.
 For sub-picosecond jitter applications (SERDES reference clocks, high-speed ADC
 clocking), ring oscillator VCOs cannot compete with LC-tank VCOs. The Q factor
 of an on-chip spiral inductor (typically 5-15) gives 10-20 dB better phase noise
-than an equivalent ring oscillator. Kestrel includes an LC-VCO generator path
-built on open-source inductor design and layout tools.
+than an equivalent ring oscillator.
 
 ### Architecture
 
-The LC-VCO uses a cross-coupled NMOS (or complementary NMOS/PMOS) negative
-resistance pair with an on-chip spiral inductor and MOS varactor tank. The
-cross-coupled pair topology is covered by expired patents from the late 1990s.
+The LC-VCO uses a cross-coupled NMOS negative resistance pair with an on-chip
+spiral inductor and MOS varactor tank.
 
 ```
         VDD
@@ -374,215 +423,16 @@ cross-coupled pair topology is covered by expired patents from the late 1990s.
    │  ┌─┴─┐  │      M1/M2 = cross-coupled pair
    │  │ C │  │
    │  └─┬─┘  │
-   ├────┬┘───┤
-   │    │     │
    └────┴─────┘
         GND
 ```
 
 ### Open-Source Tool Chain
 
-The LC-VCO generator uses four open-source tools in sequence:
+1. **ASITIC** (Berkeley) — inductor geometry optimization for target L, Q
+2. **RapidPassives** — DRC-aware GDS generation for spiral inductors
+3. **FastHenry** — 3D inductance/capacitance extraction for verification
+4. **gdsfactory** — full VCO assembly (inductor + active + varactors)
 
-**1. ASITIC (Berkeley) — Inductor Design Engine**
-
-- Source: http://rfic.eecs.berkeley.edu/~niknejad/asitic.html
-- Function: Given target L, Q, frequency, and process metal stack,
-  sweeps the inductor geometry space (turns, width, spacing, diameter,
-  shape) and identifies optimal designs.
-- Input: Technology file describing metal layers, thicknesses,
-  sheet resistance, substrate properties.
-- Output: Geometry parameters, L/Q/SRF vs frequency, lumped
-  equivalent circuit (pi-model with substrate parasitics).
-- Process support: Technology files available for SkyWater 130nm
-  (academic ports), IHP SG13G2, and readily created for any process
-  with known metal stack parameters.
-
-**2. RapidPassives — GDS Layout Generation**
-
-- Source: https://github.com/milanofthe/rapidpassives
-- License: Open source
-- Function: Generates DRC-aware GDS for spiral inductors and
-  transformers from geometry parameters.
-- Supports: Spiral inductors (square, octagonal), symmetric inductors
-  (with center tap for differential VCOs), transformers.
-- Features: Via array generation, geometry validation (no clipping or
-  overlap), arbitrary winding counts and ratios.
-- Integration: Pure Python, outputs GDS directly, trivial to wire
-  into gdsfactory component assembly.
-
-**3. Mühlhaus RFIC Inductor Toolkit — Synthesis and Modeling**
-
-- Source: https://github.com/VolkerMuehlhaus/RFIC-Inductor-Toolkit-Open
-- License: MIT (open-sourced August 2025)
-- Function: End-to-end inductor synthesis — from specs to DRC-clean
-  layout with equivalent circuit model and Spectre netlist.
-- Supports: Symmetric octagonal, symmetric square, asymmetric square
-  inductors. Patterned ground shields (PGS) for improved Q.
-- Limitation: EM simulation step uses Keysight ADS Momentum.
-  Layout generation and equivalent circuit extraction logic is open
-  and can be used independently with alternative EM solvers.
-- Value: The equivalent circuit extraction methodology and PGS
-  geometry generation are directly reusable.
-
-**4. FastHenry / FastCap (MIT) — Inductance/Capacitance Extraction**
-
-- Source: https://www.fastfieldsolvers.com/
-- License: Open source (MIT origin)
-- Function: 3D inductance and capacitance extraction from arbitrary
-  conductor geometries. Purpose-built for IC interconnect and spiral
-  inductors.
-- Use in Kestrel: Post-layout verification of inductor L and Q.
-  Cross-checks ASITIC's analytical model against a numerical
-  field solution of the actual generated layout geometry.
-- Alternative: OpenEMS (open-source FDTD) for full-wave EM
-  verification when substrate effects are critical.
-
-### LC-VCO Generator Flow
-
-```
-User specs (jitter target, freq range, process)
-        │
-        ▼
-┌───────────────────┐
-│  VCO Design Engine │  ← Determines required L, Q, tuning range
-│                    │     from phase noise/jitter budget
-│  Phase noise model:│     Leeson's equation + tank Q + bias current
-│  PN = f(L, Q, I)  │     → minimum Q for jitter target
-└───────┬───────────┘     → required L from target frequency
-        │
-        ▼
-┌───────────────────┐
-│  ASITIC            │  ← Sweep inductor geometry space
-│                    │     for target L, Q at operating freq
-│  Input: L, Q, f,  │
-│    technology file │     Output: optimal (N, W, S, Dout, shape)
-└───────┬───────────┘     + lumped equivalent circuit
-        │
-        ├─────────────────────────────────┐
-        ▼                                 ▼
-┌───────────────────┐           ┌───────────────────┐
-│  RapidPassives     │           │  FastHenry         │
-│                    │           │                    │
-│  Generate GDS from │           │  Verify L, Q from  │
-│  ASITIC geometry   │           │  3D field solution  │
-│  + PGS if needed   │           │  of generated layout│
-└───────┬───────────┘           └───────┬───────────┘
-        │                               │
-        ▼                               ▼
-┌───────────────────┐           ┌───────────────────┐
-│  gdsfactory        │           │  Check: L, Q meet  │
-│                    │           │  spec? If not,      │
-│  Assemble full VCO:│           │  iterate ASITIC     │
-│  inductor +        │           │  with tighter       │
-│  cross-coupled pair│           │  constraints        │
-│  + varactor bank   │           └───────────────────┘
-│  + bias circuit    │
-│  + guard rings     │
-└───────┬───────────┘
-        │
-        ▼
-┌───────────────────┐
-│  Output            │
-│                    │
-│  • VCO GDS layout  │
-│  • SPICE netlist   │
-│    (with extracted │
-│    inductor model) │
-│  • Verilog-AMS     │
-│    behavioral VCO  │
-└───────────────────┘
-```
-
-### Inductor Geometry Parameters
-
-The ASITIC optimization explores this parameter space:
-
-| Parameter       | Typical Range (Sky130)     | Description                    |
-|-----------------|----------------------------|--------------------------------|
-| Shape           | square, octagonal          | Octagonal preferred for Q      |
-| N (turns)       | 2 - 8                      | More turns = more L, lower SRF |
-| W (width)       | 3 - 15 µm                  | Wider = lower R, more C        |
-| S (spacing)     | 2 - 5 µm (DRC limited)    | Tighter = more L, more C       |
-| Dout (diameter) | 100 - 400 µm              | Larger = higher Q, more area   |
-| Metal layer     | Top metal (M5 on Sky130)   | Thickest metal for lowest R    |
-| PGS             | poly-Si patterned shield   | Reduces substrate coupling     |
-| Center tap      | yes (for differential)     | Required for cross-coupled VCO |
-
-### Equivalent Circuit Model
-
-The generated inductor model uses a frequency-dependent pi-network:
-
-```
-        Ls          Rs(f)
-  ──────/\/\/──────/\/\/──────
-  │                           │
-  │    Cp                Cp   │
-  ├────||────┐     ┌────||────┤
-  │          │     │          │
-  │    Rsub  │     │  Rsub    │
-  ├──/\/\/───┤     ├──/\/\/───┤
-  │          │     │          │
-  │    Csub  │     │  Csub    │
-  ├────||────┘     └────||────┤
-  │                           │
-  ─────────────────────────────
-             GND
-
-  Ls   = series inductance
-  Rs   = series resistance (frequency-dependent, skin/proximity)
-  Cp   = parallel capacitance (interwinding + oxide)
-  Rsub = substrate resistance
-  Csub = substrate capacitance
-```
-
-Parameters are extracted by ASITIC's analytical model and verified by
-FastHenry's numerical extraction. Both representations (lumped circuit
-and S-parameter touchstone) are emitted for use in SPICE and
-Verilog-AMS respectively.
-
-### Varactor Bank
-
-The LC tank tuning uses accumulation-mode MOS varactors (available in
-both Sky130 and GF180). The varactor bank is split into:
-
-- **Coarse tuning**: Switched MOM capacitor bank (4-6 bits) for
-  covering the full frequency range without excessive VCO gain.
-- **Fine tuning**: Analog varactor (continuous) driven by the PLL
-  loop filter output. Kvco kept small for low phase noise.
-
-The switched capacitor bank layout is generated by gdsfactory from
-the required capacitance values computed by the design engine. Each
-switch is a thick-oxide NMOS with known Ron, sized to maintain tank Q.
-
-### Additional Milestones for LC-VCO
-
-### M5: LC-VCO on SkyWater 130nm (Month 5-6)
-
-- ASITIC technology file validation against published Sky130 inductor data
-- RapidPassives integration into gdsfactory pipeline
-- Cross-coupled NMOS pair layout generator (parameterized W/L, fingers)
-- Varactor bank layout generator (switched cap + analog)
-- Full LC-VCO assembly with PGS
-- FastHenry extraction and verification loop
-- DRC/LVS clean
-- Phase noise simulation in Xyce
-
-### M6: LC-VCO on GF180 + Characterization (Month 7)
-
-- GF180MCU technology file for ASITIC
-- Port layout generators to GF180 metal stack
-- Silicon validation if shuttle run available (Efabless/Google MPW)
-- Publish measured vs. simulated inductor Q and VCO phase noise
-
-### LC-VCO References
-
-- A. M. Niknejad and R. G. Meyer, "Analysis, Design, and Optimization
-  of Spiral Inductors and Transformers for Si RF ICs," JSSC, 1998.
-- ASITIC: http://rfic.eecs.berkeley.edu/~niknejad/asitic.html
-- RapidPassives: https://github.com/milanofthe/rapidpassives
-- Mühlhaus Inductor Toolkit: https://github.com/VolkerMuehlhaus/RFIC-Inductor-Toolkit-Open
-- FastHenry: https://www.fastfieldsolvers.com/
-- OpenEMS: https://openems.de/
-- B. Razavi, "Design of Analog CMOS Integrated Circuits," Ch. 14 (Oscillators).
-- T. H. Lee, "The Design of CMOS Radio-Frequency Integrated Circuits," Ch. 17-18.
+This path is not yet implemented. See references in `Expired-Patents.csv`
+for patent status of the cross-coupled topology.
