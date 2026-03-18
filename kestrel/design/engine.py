@@ -18,6 +18,7 @@ class PLLSpec:
     vco_stages: int = 4      # number of ring oscillator stages (ring only)
     supply_voltage: float = 1.8  # V
     process: str = "sky130"
+    parasitic_cap: float = 0.0   # F — post-layout parasitic C per VCO node
 
 
 @dataclass
@@ -110,10 +111,19 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
     # Control voltage swing: assume VCO tunes over 0.2*Vdd to 0.8*Vdd
     v_swing = 0.6 * spec.supply_voltage
     d.vctrl_nom = spec.supply_voltage / 2.0
-    d.kvco = (spec.freq_max - spec.freq_min) / v_swing  # Hz/V
-    if d.kvco <= 0:
-        d.kvco = d.f_center * 0.3 / (spec.supply_voltage / 2)
+    kvco_schem = (spec.freq_max - spec.freq_min) / v_swing  # Hz/V
+    if kvco_schem <= 0:
+        kvco_schem = d.f_center * 0.3 / (spec.supply_voltage / 2)
         d.warnings.append("freq_min == freq_max; estimated Kvco from center freq")
+
+    # Post-layout Kvco: parasitic cap attenuates frequency modulation
+    # Kvco_actual = Kvco_schem * C_gate / (C_gate + C_parasitic)
+    c_gate_est = 20e-15
+    if spec.parasitic_cap > 0:
+        kvco_atten = c_gate_est / (c_gate_est + spec.parasitic_cap)
+        d.kvco = kvco_schem * kvco_atten
+    else:
+        d.kvco = kvco_schem
 
     kvco_rad = d.kvco * 2 * math.pi  # rad/s/V
 
@@ -272,19 +282,35 @@ def _size_transistors(d: PLLDesign):
 
     # --- VCO delay cell sizing ---
     # Ring oscillator: f = 1 / (2 * N_stages * t_delay)
-    # t_delay = C_load * V_swing / I_stage
-    # Target current per stage from frequency and estimated load cap
+    # t_delay = C_total * V_swing / I_stage
+    # C_total = C_gate (intrinsic) + C_parasitic (from layout)
+    #
+    # With parasitics, the actual frequency is:
+    #   f_actual = f_intrinsic * C_gate / (C_gate + C_parasitic)
+    #
+    # To hit the target f_center after parasitics, size the VCO for
+    # an intrinsic frequency that's higher by the ratio
+    #   (C_gate + C_parasitic) / C_gate
     n_stg = d.spec.vco_stages
-    t_delay = 1.0 / (2 * n_stg * d.f_center)
-
-    # Estimate load capacitance from gate cap of next stage
-    # Start with reasonable current and iterate
-    # I_stage = C_load * V_swing / t_delay
-    # V_swing ~ 0.4 * Vdd for differential ring
     v_swing_vco = 0.4 * vdd
-    # Assume C_load ~ 20fF initial guess (gate cap + wiring)
-    c_load_est = 20e-15
-    d.vco_i_stage = c_load_est * v_swing_vco / t_delay
+    c_gate_est = 20e-15              # intrinsic gate + wiring cap
+    c_parasitic = d.spec.parasitic_cap
+    c_total = c_gate_est + c_parasitic
+
+    # The ring oscillator frequency is f = 1/(2*N*C_total*Vswing/I).
+    # With parasitic cap, C_total > C_gate, so for the same current
+    # the frequency drops.  To hit f_center post-layout, we need to
+    # design for a higher intrinsic frequency:
+    #   f_intrinsic = f_center * C_total / C_gate
+    # Then: f_actual = f_intrinsic * C_gate / C_total = f_center. ✓
+    f_design = d.f_center * c_total / c_gate_est
+    t_delay = 1.0 / (2 * n_stg * f_design)
+
+    # Size for intrinsic load cap (C_gate) at the higher frequency
+    # I = C_gate * V_swing / t_delay
+    # The parasitic cap is there in reality but doesn't need more
+    # current — it just slows the ring back down to f_center.
+    d.vco_i_stage = c_gate_est * v_swing_vco / t_delay
 
     # Clamp to reasonable range
     d.vco_i_stage = max(50e-6, min(2e-3, d.vco_i_stage))
