@@ -62,13 +62,31 @@ drive every representation.
 Optimization converged in 112 evaluations (cost 0.363 → 0.249).
 Refit behavioral model matches transistor curve within ±3.3%.
 
+- **GDSII layout generator** (`layout/gds_gen.py`) — gdsfactory-based,
+  full PLL layout from design engine parameters.  Sky130 layers,
+  parameterized NFET/PFET primitives with contact stacks, Maneatis
+  delay cell, VCO ring, charge pump, PFD, loop filter, divider, and
+  top-level assembly with inter-block routing.
+- **KLayout netlist extraction** (`layout/extract.py`) — MOS3Transistor
+  device recognition from physical geometry.  Flat extraction with
+  sky130 layer connectivity (DIFF→LICON→LI→MCON→MET1→VIA1→MET2→VIA2→MET3).
+- **Parasitic analysis** (`layout/parasitics.py`) — wire R/C from
+  layout geometry using sky130 interconnect parameters.  Impact estimates
+  for VCO frequency shift, loop bandwidth, supply IR drop, phase noise,
+  and inter-stage crosstalk.
+- **Layout vs design comparison** (`layout/compare.py`) — geometric W/L
+  verification of extracted devices against design-engine sizing.
+- **Iterative design loop** (`layout/iterate.py`) — closed-loop
+  design→layout→extract→compare flow with parasitic feedback.
+
 ### Not Yet Implemented
 
-- GDS/OASIS layout generation (planned: gdsfactory)
+- SPICE-in-the-loop VCO frequency tuning (ngspice/Xyce on extracted netlist)
+- DRC clean on sky130
+- LVS passing (full hierarchical)
 - SV-RNM behavioral model
 - PSL/SVA assertions
 - Probability waveform jitter model
-- LVS / DRC automation
 - LC-VCO path (inductor design, see Appendix A)
 
 ## Architecture
@@ -188,6 +206,14 @@ kestrel/
 │   ├── kes_vco_delay_cell.kicad_sch  # VCO delay cell schematic
 │   ├── kes_vco_delay_cell.kicad_pro  # KiCad project
 │   └── gen_delay_cell.py             # Schematic generator script
+├── layout/
+│   ├── gds_gen.py                     # GDSII layout generator (gdsfactory)
+│   ├── extract.py                     # KLayout netlist extraction
+│   ├── parasitics.py                  # Parasitic R/C estimation
+│   ├── compare.py                     # Layout vs design-engine comparison
+│   ├── iterate.py                     # Iterative design→layout→extract loop
+│   ├── kestrel_pll.gds               # Generated PLL layout
+│   └── kestrel_pll_flat_extracted.cir # Extracted SPICE netlist
 ├── tests/
 │   └── test_behavioral.py       # Emitter tests
 ├── docs/
@@ -304,10 +330,104 @@ All parameters in `opt/config.yaml`:
 - Optimizer method (nelder-mead, powell, cobyla, differential-evolution)
 - Cost function (mse_relative, mse_absolute, max_relative)
 
+## Layout Generation and Extraction
+
+The `layout/` directory contains the physical design flow: generate GDSII
+from the design engine, extract a SPICE netlist from the layout, compare
+against the intended design, and estimate parasitic impact.
+
+### Quick Start
+
+```bash
+cd /usr/local/src/kestrel
+
+# Generate PLL layout (writes layout/kestrel_pll.gds)
+python3 layout/gds_gen.py
+
+# Extract SPICE netlist from layout
+# (flatten first for cross-hierarchy via connectivity)
+python3 -c "
+import klayout.db as kdb
+layout = kdb.Layout()
+layout.read('layout/kestrel_pll.gds')
+layout.top_cells()[0].flatten(True)
+layout.write('/tmp/kestrel_pll_flat.gds')
+"
+python3 layout/extract.py /tmp/kestrel_pll_flat.gds -v
+
+# Compare extracted W/L against design engine
+python3 layout/compare.py
+
+# Parasitic R/C analysis
+python3 layout/parasitics.py layout/kestrel_pll.gds
+
+# Iterative design→layout→extract loop
+python3 layout/iterate.py --max-iter 5 --tol 5.0
+```
+
+### Layout Architecture
+
+The layout generator uses three metal layers to avoid shorts:
+
+| Layer | Usage |
+|-------|-------|
+| MET1 | Transistor contacts, local same-row wiring |
+| MET2 | Intra-cell inter-row routing (diff pair ↔ tail, diff pair ↔ load) |
+| MET3 | Inter-stage routing (VCO stage-to-stage, feedback) |
+
+Each metal transition uses a via stack (VIA1 for MET1↔MET2, VIA2 for
+MET2↔MET3).  This layering prevents MET2 polygon merging that would
+short source and drain nets within the delay cell.
+
+### Extraction Details
+
+The KLayout extractor uses `DeviceExtractorMOS3Transistor` (3-terminal:
+G, S, D) with the gate region as the `P` (oxide marker) layer.  This
+avoids the S/D-to-bulk short that `DeviceExtractorMOS4Transistor` causes
+when there is no explicit substrate tap layer.
+
+Extraction must run on a **flattened** layout because VIA1 connections
+between parent-level routing and child-cell MET1 contacts are not visible
+across the GDS hierarchy boundary.
+
+The extracted netlist includes per-device W, L, AS, AD, PS, PD parameters
+with sky130 model names (`sky130_fd_pr__nfet_01v8`, `sky130_fd_pr__pfet_01v8`).
+
+### Parasitic Feedback
+
+The analytical parasitic model estimates ~4.3 fF per VCO output node from
+MET1+MET2 routing (against a 20 fF intrinsic gate capacitance).  The design
+engine compensates by:
+
+1. Targeting a higher intrinsic VCO frequency:
+   `f_intrinsic = f_target × (C_gate + C_parasitic) / C_gate`
+2. De-rating Kvco for loop filter sizing:
+   `Kvco_actual = Kvco_schematic × C_gate / (C_gate + C_parasitic)`
+
+This gets within ~15% on the first analytical pass.  Closing the remaining
+gap requires SPICE simulation of the extracted netlist (not yet automated).
+
+### Key Results (March 2026)
+
+| Metric | Value |
+|--------|-------|
+| Die size | 94 × 70 um |
+| Devices extracted | 131 (44 NFET + 87 PFET) |
+| Signal nets | 335 |
+| Total wire R | 28 kohm |
+| Total wire C | 197 fF |
+| VCO parasitic C/node | 4.3 fF |
+| VCO freq shift (analytical) | −15% |
+| Supply IR drop | 0.2% |
+| Phase noise degradation | 0.02 dB |
+| Inter-stage crosstalk | 14% of load cap |
+
 ## Dependencies
 
 - **NumPy / SciPy** — numerical computation, optimization
 - **PyYAML** — configuration files
+- **gdsfactory** — GDSII layout generation (`pip install gdsfactory`)
+- **KLayout** — netlist extraction, Python bindings (`pip install klayout`)
 - **Xyce** (optional) — transistor-level SPICE simulation
 - **ngspice** (optional) — behavioral SPICE simulation
 - **OpenVAF** (optional) — compile Verilog-A to OSDI for ngspice
@@ -338,12 +458,18 @@ All parameters in `opt/config.yaml`:
 - [x] Behavioral model refit to match transistor curve
 - [x] KiCad schematic (delay cell)
 
-### M4: Layout and Extraction — TODO
+### M4: Layout and Extraction — IN PROGRESS
 
-- [ ] gdsfactory layout generators (VCO, CP, PFD, filter)
+- [x] gdsfactory layout generators (VCO, CP, PFD, filter, divider, top)
+- [x] KLayout netlist extraction (MOS3, flat, sky130 layers)
+- [x] Geometric sizing comparison (extracted W/L vs design engine)
+- [x] Parasitic R/C estimation from wire geometry
+- [x] Iterative design→layout→extract loop with parasitic feedback
+- [x] Design engine parasitic-aware VCO sizing and Kvco de-rating
+- [ ] SPICE-in-the-loop VCO frequency tuning
 - [ ] DRC clean on sky130
-- [ ] LVS passing
-- [ ] Extraction-in-the-loop optimization (Calibre or Magic)
+- [ ] LVS passing (full hierarchical)
+- [ ] Extraction-in-the-loop optimization (KLayout or Magic)
 
 ### M5: LC-VCO Option — TODO
 
