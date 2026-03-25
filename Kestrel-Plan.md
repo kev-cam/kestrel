@@ -466,7 +466,7 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
 - [x] Parasitic R/C estimation from wire geometry
 - [x] Iterative design→layout→extract loop with parasitic feedback
 - [x] Design engine parasitic-aware VCO sizing and Kvco de-rating
-- [ ] SPICE-in-the-loop VCO frequency tuning
+- [x] SPICE-in-the-loop VCO frequency tuning (Xyce, converges in 7 iterations)
 - [ ] DRC clean on sky130
 - [ ] LVS passing (full hierarchical)
 - [ ] Extraction-in-the-loop optimization (KLayout or Magic)
