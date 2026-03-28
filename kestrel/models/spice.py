@@ -40,6 +40,16 @@ def _um(val: float) -> str:
     return f"{val*1e6:.3f}u"
 
 
+def _mosfet(name: str, d: str, g: str, s: str, b: str,
+            model: str, w: str, l: str, prefix: str = "M") -> str:
+    """Format a MOSFET instance line with the correct prefix.
+
+    M prefix for direct .MODEL cards (sky130, gf180).
+    X prefix for .SUBCKT wrappers (sg13g2).
+    """
+    return f"{prefix}{name} {d} {g} {s} {b} {model} W={w} L={l}"
+
+
 def _eng(val: float) -> str:
     """Format a value with SPICE suffix."""
     if val == 0:
@@ -79,9 +89,20 @@ def _write_vco(d: PLLDesign, out: str) -> str:
     proc = get_process_params(d.spec.process)
     nfet = proc["nfet"]
     pfet = proc["pfet"]
+    pfx = proc.get("inst_prefix", "M")
+    m = _mosfet
 
     with open(path, "w") as f:
         f.write(_header(d))
+
+        tail_w = _um(d.vco_tail_w)
+        tail_l = _um(d.vco_tail_l)
+        diff_w = _um(d.vco_diff_w)
+        diff_l = _um(d.vco_diff_l)
+        load_w = _um(d.vco_load_w)
+        load_l = _um(d.vco_load_l)
+        bias_w = _um(d.vco_bias_w)
+        bias_l = _um(d.vco_bias_l)
 
         # --- Maneatis delay cell subcircuit ---
         # Ports: outp outn inp inn vctrl vbn vdd vss
@@ -96,20 +117,20 @@ def _write_vco(d: PLLDesign, out: str) -> str:
 .SUBCKT kestrel_delay_cell outp outn inp inn vctrl vbn vdd vss
 
 * Tail current source
-Mtail  tail  vbn  vss  vss  {nfet} W={_um(d.vco_tail_w)} L={_um(d.vco_tail_l)}
+{m("tail", "tail", "vbn", "vss", "vss", nfet, tail_w, tail_l, pfx)}
 
 * Differential pair
-Mn1    outn  inp  tail vss  {nfet} W={_um(d.vco_diff_w)} L={_um(d.vco_diff_l)}
-Mn2    outp  inn  tail vss  {nfet} W={_um(d.vco_diff_w)} L={_um(d.vco_diff_l)}
+{m("n1", "outn", "inp", "tail", "vss", nfet, diff_w, diff_l, pfx)}
+{m("n2", "outp", "inn", "tail", "vss", nfet, diff_w, diff_l, pfx)}
 
 * Symmetric load (Maneatis)
 * Each load has two PMOS in series: one diode-connected, one controlled
 * The control voltage sets the ratio of triode/saturation operation,
 * which determines the output swing independent of frequency.
-Mp1a   outn  outn vdd  vdd  {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
-Mp1b   outn  vctrl vdd vdd  {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
-Mp2a   outp  outp vdd  vdd  {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
-Mp2b   outp  vctrl vdd vdd  {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
+{m("p1a", "outn", "outn", "vdd", "vdd", pfet, load_w, load_l, pfx)}
+{m("p1b", "outn", "vctrl", "vdd", "vdd", pfet, load_w, load_l, pfx)}
+{m("p2a", "outp", "outp", "vdd", "vdd", pfet, load_w, load_l, pfx)}
+{m("p2b", "outp", "vctrl", "vdd", "vdd", pfet, load_w, load_l, pfx)}
 
 .ENDS kestrel_delay_cell
 
@@ -124,13 +145,13 @@ Mp2b   outp  vctrl vdd vdd  {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
 .SUBCKT kestrel_vco_bias vbn vctrl vdd vss
 
 * Replica bias branch — diode-connected NMOS sets vbn
-Mbias  vbn   vbn   vss  vss  {nfet} W={_um(d.vco_bias_w)} L={_um(d.vco_bias_l)}
+{m("bias", "vbn", "vbn", "vss", "vss", nfet, bias_w, bias_l, pfx)}
 
 * Replica load — mirrors the delay cell load structure
 * Diode-connected PMOS generates vctrl
-Mrep_p vbn  vbn  vdd  vdd  {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
-Mrep_c drain_rep vctrl vdd vdd {pfet} W={_um(d.vco_load_w)} L={_um(d.vco_load_l)}
-Mrep_n drain_rep vbn vss vss {nfet} W={_um(d.vco_diff_w)} L={_um(d.vco_diff_l)}
+{m("rep_p", "vbn", "vbn", "vdd", "vdd", pfet, load_w, load_l, pfx)}
+{m("rep_c", "drain_rep", "vctrl", "vdd", "vdd", pfet, load_w, load_l, pfx)}
+{m("rep_n", "drain_rep", "vbn", "vss", "vss", nfet, diff_w, diff_l, pfx)}
 
 * Startup circuit — small current to prevent degenerate zero-current state
 Istart vdd vbn {_eng(d.vco_i_stage / 100)}
@@ -199,6 +220,8 @@ def _write_pfd(d: PLLDesign, out: str) -> str:
     proc = get_process_params(d.spec.process)
     nfet = proc["nfet"]
     pfet = proc["pfet"]
+    pfx = proc.get("inst_prefix", "M")
+    m = _mosfet
     nw = _um(d.pfd_nw)
     nl = _um(d.pfd_nl)
     pw = _um(d.pfd_pw)
@@ -213,10 +236,10 @@ def _write_pfd(d: PLLDesign, out: str) -> str:
 * 2-input NAND gate
 **********************************************************************
 .SUBCKT nand2 out a b vdd vss
-Mp1 out a vdd vdd {pfet} W={pw} L={pl}
-Mp2 out b vdd vdd {pfet} W={pw} L={pl}
-Mn1 out a mid vss {nfet} W={nw} L={nl}
-Mn2 mid  b vss vss {nfet} W={nw} L={nl}
+{m("p1", "out", "a", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("p2", "out", "b", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("n1", "out", "a", "mid", "vss", nfet, nw, nl, pfx)}
+{m("n2", "mid", "b", "vss", "vss", nfet, nw, nl, pfx)}
 .ENDS nand2
 
 """)
@@ -227,8 +250,8 @@ Mn2 mid  b vss vss {nfet} W={nw} L={nl}
 * Inverter
 **********************************************************************
 .SUBCKT inv out in vdd vss
-Mp out in vdd vdd {pfet} W={pw} L={pl}
-Mn out in vss vss {nfet} W={nw} L={nl}
+{m("p", "out", "in", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("n", "out", "in", "vss", "vss", nfet, nw, nl, pfx)}
 .ENDS inv
 
 """)
@@ -300,6 +323,16 @@ def _write_charge_pump(d: PLLDesign, out: str) -> str:
     proc = get_process_params(d.spec.process)
     nfet = proc["nfet"]
     pfet = proc["pfet"]
+    pfx = proc.get("inst_prefix", "M")
+    m = _mosfet
+
+    cp_up_w = _um(d.cp_up_w)
+    cp_up_l = _um(d.cp_up_l)
+    cp_dn_w = _um(d.cp_dn_w)
+    cp_dn_l = _um(d.cp_dn_l)
+    sw_w = _um(d.cp_sw_w)
+    sw_l = _um(d.cp_sw_l)
+    sw_half_w = _um(d.cp_sw_w * 0.5)
 
     with open(path, "w") as f:
         f.write(_header(d))
@@ -311,23 +344,23 @@ def _write_charge_pump(d: PLLDesign, out: str) -> str:
 
 * UP current source (PMOS) — sources Icp when UP is active
 * Current mirror: Mp_mir is diode-connected reference
-Mp_mir  pbias pbias vdd vdd {pfet} W={_um(d.cp_up_w)} L={_um(d.cp_up_l)}
-Mp_src  up_drain pbias vdd vdd {pfet} W={_um(d.cp_up_w)} L={_um(d.cp_up_l)}
+{m("p_mir", "pbias", "pbias", "vdd", "vdd", pfet, cp_up_w, cp_up_l, pfx)}
+{m("p_src", "up_drain", "pbias", "vdd", "vdd", pfet, cp_up_w, cp_up_l, pfx)}
 
 * UP switch — PMOS pass gate (active-low UP means UP_b)
 * UP signal is active-high from PFD, so invert for PMOS switch
-Mp_sw   out  up_b  up_drain vdd {pfet} W={_um(d.cp_sw_w)} L={_um(d.cp_sw_l)}
+{m("p_sw", "out", "up_b", "up_drain", "vdd", pfet, sw_w, sw_l, pfx)}
 Rinv_up up_node up 1
 * Simple inverter for UP_b
-Mp_inv  up_b up_node vdd vdd {pfet} W={_um(d.cp_sw_w)} L={_um(d.cp_sw_l)}
-Mn_inv  up_b up_node vss vss {nfet} W={_um(d.cp_sw_w * 0.5)} L={_um(d.cp_sw_l)}
+{m("p_inv", "up_b", "up_node", "vdd", "vdd", pfet, sw_w, sw_l, pfx)}
+{m("n_inv", "up_b", "up_node", "vss", "vss", nfet, sw_half_w, sw_l, pfx)}
 
 * DN current source (NMOS) — sinks Icp when DN is active
-Mn_mir  nbias nbias vss vss {nfet} W={_um(d.cp_dn_w)} L={_um(d.cp_dn_l)}
-Mn_src  dn_drain nbias vss vss {nfet} W={_um(d.cp_dn_w)} L={_um(d.cp_dn_l)}
+{m("n_mir", "nbias", "nbias", "vss", "vss", nfet, cp_dn_w, cp_dn_l, pfx)}
+{m("n_src", "dn_drain", "nbias", "vss", "vss", nfet, cp_dn_w, cp_dn_l, pfx)}
 
 * DN switch — NMOS pass gate (active-high DN)
-Mn_sw   out  dn  dn_drain vss {nfet} W={_um(d.cp_sw_w * 0.5)} L={_um(d.cp_sw_l)}
+{m("n_sw", "out", "dn", "dn_drain", "vss", nfet, sw_half_w, sw_l, pfx)}
 
 * Bias current reference
 Ibias_p vdd pbias {_eng(d.icp)}
@@ -378,6 +411,8 @@ def _write_divider(d: PLLDesign, out: str) -> str:
     proc = get_process_params(d.spec.process)
     nfet = proc["nfet"]
     pfet = proc["pfet"]
+    pfx = proc.get("inst_prefix", "M")
+    m = _mosfet
     nw = _um(d.div_nw)
     nl = _um(d.div_nl)
     pw = _um(d.div_pw)
@@ -395,26 +430,26 @@ def _write_divider(d: PLLDesign, out: str) -> str:
 .SUBCKT kestrel_tspc_div2 out in vdd vss
 
 * First stage (clk-low transparent)
-Mp1 n1 in   vdd  vdd {pfet} W={pw} L={pl}
-Mn1 n1 in   vss  vss {nfet} W={nw} L={nl}
+{m("p1", "n1", "in", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("n1", "n1", "in", "vss", "vss", nfet, nw, nl, pfx)}
 
 * Second stage (clk-high transparent, with feedback)
-Mp2 vdd in  n2   vdd {pfet} W={pw} L={pl}
-Mn2 n2  n1  n3   vss {nfet} W={nw} L={nl}
-Mn3 n3  in  vss  vss {nfet} W={nw} L={nl}
+{m("p2", "vdd", "in", "n2", "vdd", pfet, pw, pl, pfx)}
+{m("n2", "n2", "n1", "n3", "vss", nfet, nw, nl, pfx)}
+{m("n3", "n3", "in", "vss", "vss", nfet, nw, nl, pfx)}
 
 * Third stage (output latch)
-Mp3 n4  n2  vdd  vdd {pfet} W={pw} L={pl}
-Mn4 n4  n2  vss  vss {nfet} W={nw} L={nl}
+{m("p3", "n4", "n2", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("n4", "n4", "n2", "vss", "vss", nfet, nw, nl, pfx)}
 
 * Output inverter
-Mp5 out n4  vdd  vdd {pfet} W={pw} L={pl}
-Mn5 out n4  vss  vss {nfet} W={nw} L={nl}
+{m("p5", "out", "n4", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("n5", "out", "n4", "vss", "vss", nfet, nw, nl, pfx)}
 
 * Feedback: output back to first stage input for toggle
 * Connect n1 input to output (inverted) for divide-by-2
-Mp6 n1_fb out vdd vdd {pfet} W={pw} L={pl}
-Mn6 n1_fb out vss vss {nfet} W={nw} L={nl}
+{m("p6", "n1_fb", "out", "vdd", "vdd", pfet, pw, pl, pfx)}
+{m("n6", "n1_fb", "out", "vss", "vss", nfet, nw, nl, pfx)}
 
 .ENDS kestrel_tspc_div2
 

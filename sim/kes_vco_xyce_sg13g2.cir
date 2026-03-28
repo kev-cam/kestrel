@@ -1,0 +1,108 @@
+* Kestrel VCO — Transistor-level range characterization (Xyce)
+* IHP SG13G2 / SG13CMOS5L — 130nm SiGe BiCMOS, 1.2V low-voltage CMOS
+*
+* 4-stage differential Maneatis ring oscillator
+* Sweep Vctrl from 0.2V to 1.0V, measure oscillation frequency
+*
+
+**********************************************************************
+* Process models — IHP SG13G2 low-voltage CMOS (PSP)
+*
+* Requires IHP-Open-PDK installed at $PDK_ROOT/ihp-sg13g2.
+* The cornerMOSlv library provides TT/SS/FF/SF/FS corners.
+**********************************************************************
+.LIB "/usr/local/src/pdks/ihp-sg13g2/ihp-sg13g2/libs.tech/xyce/models/cornerMOSlv.lib" mos_tt
+
+**********************************************************************
+* VCO subcircuits
+**********************************************************************
+
+* Maneatis delay cell — differential pair + symmetric load
+.SUBCKT kestrel_delay_cell outp outn inp inn vctrl vbn vdd vss
+
+* Tail current source (L=0.5u for analog matching)
+Xtail  tail  vbn  vss  vss  sg13_lv_nmos W=4u L=0.5u
+
+* Differential pair — sized for gm > gm_load to ensure oscillation
+Xn1    outn  inp  tail vss  sg13_lv_nmos W=2u L=0.34u
+Xn2    outp  inn  tail vss  sg13_lv_nmos W=2u L=0.34u
+
+* Symmetric load (Maneatis) — diode + Vctrl-controlled PFET pair
+Xp1a   outn  outn vdd  vdd  sg13_lv_pmos W=3u L=0.5u
+Xp1b   outn  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
+Xp2a   outp  outp vdd  vdd  sg13_lv_pmos W=3u L=0.5u
+Xp2b   outp  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
+
+.ENDS kestrel_delay_cell
+
+* Self-biased replica bias generator (Maneatis)
+* vbn is the replica output — negative feedback loop
+.SUBCKT kestrel_vco_bias vbn vctrl vdd vss
+
+* Diode NFET — mirrors tail current
+Xrep_n   vbn  vbn  vss  vss  sg13_lv_nmos W=2u L=0.5u
+* Diode PFET load (matches Xp1a/Xp2a in delay cell)
+Xrep_pd  vbn  vbn  vdd  vdd  sg13_lv_pmos W=3u L=0.5u
+* Vctrl-controlled PFET load (matches Xp1b/Xp2b in delay cell)
+Xrep_pc  vbn  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
+* Startup current to avoid degenerate vbn=0 solution
+Istart vdd vbn 5u
+
+.ENDS kestrel_vco_bias
+
+* Ring oscillator VCO — 4-stage differential
+.SUBCKT kestrel_vco outp outn vctrl_ext vdd vss
+
+Xbias vbn vctrl_int vdd vss kestrel_vco_bias
+Rsw vctrl_ext vctrl 1
+Rbias vctrl_int vctrl 100k
+
+Xstage0 dp_0 dn_0 dn_3 dp_3 vctrl vbn vdd vss kestrel_delay_cell
+Xstage1 dp_1 dn_1 dp_0 dn_0 vctrl vbn vdd vss kestrel_delay_cell
+Xstage2 dp_2 dn_2 dp_1 dn_1 vctrl vbn vdd vss kestrel_delay_cell
+Xstage3 dp_3 dn_3 dp_2 dn_2 vctrl vbn vdd vss kestrel_delay_cell
+
+Routp dp_3 outp 1
+Routn dn_3 outn 1
+
+.ENDS kestrel_vco
+
+**********************************************************************
+* Testbench
+**********************************************************************
+Vdd vdd 0 1.2
+Vss vss 0 0
+
+* Sweep control voltage via .STEP
+Vctrl vctrl 0 {vctrl_val}
+.PARAM vctrl_val = 0.6
+
+Xvco outp outn vctrl vdd vss kestrel_vco
+
+* Small cap load
+Cload_p outp 0 10f
+Cload_n outn 0 10f
+
+* Differential output for frequency measurement
+Ediff diff 0 outp outn 1.0
+
+* Startup kick — inject asymmetric current to break symmetry
+Ikick 0 Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
+
+**********************************************************************
+* Transient analysis
+**********************************************************************
+.TRAN 50p 500n
+
+* Print output waveform + bias voltage
+.PRINT TRAN V(outp) V(outn) V(vctrl) V(Xvco:vbn) V(diff)
+
+* Measure frequency from differential zero crossings
+.MEASURE TRAN t1 WHEN V(diff)=0 RISE=3 TD=50n
+.MEASURE TRAN t2 WHEN V(diff)=0 RISE=4 TD=50n
+* f_vco = 1/(t2-t1), computed from measure output file
+
+* Step Vctrl for range sweep (1.2V supply, so sweep up to ~1.0V)
+.STEP vctrl_val 0.2 1.0 0.05
+
+.END

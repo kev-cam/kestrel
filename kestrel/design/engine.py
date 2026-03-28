@@ -243,6 +243,7 @@ _PROCESS_PARAMS = {
         "vdd": 1.8,
         "model_lib": "sky130_fd_pr/cells",
         "corner": "tt",
+        "inst_prefix": "M",   # direct .MODEL cards — use M prefix
     },
     "gf180": {
         "nfet": "nfet_03v3",
@@ -256,6 +257,21 @@ _PROCESS_PARAMS = {
         "vdd": 3.3,
         "model_lib": "gf180mcu_fd_pr",
         "corner": "tt",
+        "inst_prefix": "M",
+    },
+    "sg13g2": {
+        "nfet": "sg13_lv_nmos",
+        "pfet": "sg13_lv_pmos",
+        "lmin": 340e-9,       # m — NMOS Lmin=0.34u (PMOS=0.28u, use larger)
+        "l_analog": 500e-9,   # m — longer L for analog matching
+        "kpn": 298.8e-6,      # A/V^2 — from IHP characterization (W/L=1u/1u)
+        "kpp": 82.18e-6,      # A/V^2 — from IHP characterization
+        "vtn": 0.255,         # V — NMOS threshold (nominal)
+        "vtp": 0.353,         # V — PMOS |Vtp| (nominal)
+        "vdd": 1.2,
+        "model_lib": "cornerMOSlv",
+        "corner": "mos_tt",
+        "inst_prefix": "X",   # .SUBCKT wrappers — use X prefix
     },
 }
 

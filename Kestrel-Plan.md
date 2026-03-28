@@ -161,6 +161,12 @@ Schematic netlist (from design engine)
   integrated and tested with Xyce (binned models, TT corner).
 - **GlobalFoundries GF180MCU** — open 180nm MCU process.
   Supported in design engine; transistor-level sim not yet validated.
+- **IHP SG13G2** — open 130nm SiGe BiCMOS (low-voltage 1.2V CMOS).
+  PSP models via IHP-Open-PDK Xyce libs. Design engine sized with
+  kpn=299uA/V², vtn=0.255V, kpp=82uA/V², vtp=0.353V.
+  VCO testbench: `sim/kes_vco_xyce_sg13g2.cir`.
+  Requires `$PDK_ROOT/ihp-sg13g2` (see
+  https://github.com/IHP-GmbH/IHP-Open-PDK).
 
 ### Commercial PDKs (Roadmap)
 
@@ -193,6 +199,7 @@ kestrel/
 │   ├── kes_run_beh.sp           # Behavioral PLL testbench (ngspice)
 │   ├── kes_tb_beh.sp            # Behavioral PLL netlist
 │   ├── kes_vco_xyce.cir         # Transistor VCO testbench (Xyce + sky130)
+│   ├── kes_vco_xyce_sg13g2.cir # Transistor VCO testbench (Xyce + IHP SG13G2)
 │   ├── vco_range.sh             # VCO range sweep script
 │   ├── models/                  # sky130 BSIM4 model files
 │   └── opt/
