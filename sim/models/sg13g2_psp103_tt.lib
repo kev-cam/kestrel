@@ -1,0 +1,132 @@
+.model sg13g2_nmos nmos level=103
++ a1l=0.052176 a1o=6.239 a1w=-0.052179 a2o=17.75 a3l=-0.045201 a3o=0.708
++ a3w=-0.041992 a4l=0 a4o=0.04649 a4w=1.581e-16 agidldw=0 agidlw=0.001262
++ alp1l1=0.021138 alp1l2=0.04044 alp1lexp=0.25 alp1w=-0.077622 alp2l1=2.6817
++ alp2l2=0 alp2lexp=0.25 alp2w=-0.13012 alpl=0.0088345 alplexp=0.68143
++ alpnoi=1.869 alpw=1.0825 axl=1.0186 axo=13.547 betedgew=0 betw1=-0.020925
++ betw2=0.0087681 bgidldo=41 bgidlo=19.92 cbbtbot=1e-12 cbbtbotd=1e-12
++ cbbtgat=1e-18 cbbtgatd=1e-18 cbbtsti=1e-21 cbbtstid=1e-18 cfbedgeo=0
++ cfbo=0.6952 cfdedgeo=0 cfdo=0 cfedgel=0 cfedgelexp=2 cfedgew=0
++ cfl=8.9001e-08 cflexp=3.9688 cfrdw=0 cfw=-0.17956 cgbovl=4.4409e-28
++ cgidldo=0 cgidlo=0.06641 chibo=3.1 cjorbotd=0.001 cjorgatd=1e-09
++ cjorstid=1e-09 csl=0.12341 cslexp=1.1398 cslw=-0.00044184 cso=0.3164
++ csrhbot=100 csrhbotd=100 csrhgat=6.682e-06 csrhgatd=0.0001 csrhsti=0.0001
++ csrhstid=0.0001 csw=0.19805 ctatbot=100 ctatbotd=100 ctatgat=0.0001
++ ctatgatd=0.0001 ctatsti=0.0001 ctatstid=0.0001 ctbo=0 ctedgel=0 ctedgelexp=1
++ ctedgeo=0 ctgo=0 ctl=0.015058 ctlexp=0.85719 ctlw=0.008767 cto=0.054556
++ ctw=-0.096878 delvtacl=0 delvtaclexp=1 delvtaclw=0 delvtaco=0 delvtacw=0
++ dlsil=0 dnsubo=4.4409e-16 dphibedgel=0 dphibedgelexp=1 dphibedgelw=0
++ dphibedgeo=0 dphibedgew=0 dphibl=0.24027 dphiblexp=0.068979 dphibo=-0.25737
++ dphibw=0.0168 dta=0 dvsbnudo=1 dwq=-1e-08 efedgeo=1 efo=1 epsroxo=3.9
++ facneffacl=0 facneffaclw=0 facneffaco=1 facneffacw=0 fbbtrbot=1e+09
++ fbbtrbotd=1e+09 fbbtrgat=1e+09 fbbtrgatd=1e+09 fbbtrsti=1e+09
++ fbbtrstid=1e+09 fbet1=12.168 fbet1w=0.38931 fbet2=-2.302 fbetedge=0 fetao=1
++ fjunq=0.03 fjunqd=0.03 fntedgeo=1 fntexcl=0 fnto=1 fol1=-0.0091066
++ fol2=0.0021139 frev=1000 gc2o=0.8413 gc3o=-0.4698 gcoo=10 gfacnudl=0
++ gfacnudlexp=1 gfacnudlw=0 gfacnudo=1 gfacnudw=0 idsatrbot=6.3087e-08
++ idsatrbotd=1e-12 idsatrgat=0 idsatrgatd=1e-18 idsatrsti=1.9278e-15
++ idsatrstid=1e-18 iginvlw=148120 igovdw=0 igovw=3026.8 imax=0.0015358 kuo=0
++ kuowel=0 kuowelw=0 kuoweo=0 kuowew=0 kvsat=0 kvtho=0 kvthowel=0 kvthowelw=0
++ kvthoweo=0 kvthowew=0 lap=2.9423e-08 lintnoi=-3.7e-08 lkuo=0 lkvtho=0
++ llodkuo=0 llodvth=0 lodetao=1 lov=2.9423e-08 lovd=0 lp1=5.1674e-09
++ lp1w=-0.1544 lp2=1.9441e-08 lpck=3.171e-07 lpckw=0 lpedge=1e-08 lvarl=0
++ lvaro=0 lvarw=0 mefftatbot=5.204 mefftatbotd=0.25 mefftatgat=0.25
++ mefftatgatd=0.25 mefftatsti=3.364 mefftatstid=0.25 mueo=0.77874
++ muew=0.030943 munqso=1 nfaedgelw=8e+22 nfalw=7.616e+25 nfbedgelw=3e+07
++ nfblw=1.026e+09 nfcedgelw=0 nfclw=-5e-08 novdo=5e+25 novo=3.5714e+25
++ npck=1.743e+21 npckw=-1.484 npl=0 npo=4.6457e+26 nslpo=0.05 nsubedgel=0
++ nsubedgelexp=1 nsubedgelw=0 nsubedgeo=5e+23 nsubedgew=0 nsubo=1.0483e+23
++ nsubw=7.5708 pbot=0.31309 pbotd=0.5 pbrbot=4 pbrbotd=4 pbrgat=4 pbrgatd=4
++ pbrsti=4 pbrstid=4 pgat=0.5424 pgatd=0.5 phigbot=1.1136 phigbotd=1.16
++ phiggat=1.16 phiggatd=1.16 phigsti=1.3844 phigstid=1.16 pkuo=0 pkvtho=0
++ pscebedgeo=0 pscebo=0 pscededgeo=0 pscedo=0 psceedgel=0 psceedgelexp=2
++ psceedgew=0 pscel=0 pscelexp=2 pscew=0 psti=0.27362 pstid=0.5 qmc=1 rbulko=0
++ rgo=0 rint=1.3025e-11 rjundo=0 rjunso=0 rsbo=-0.099725 rsgo=0.074518 rsh=0
++ rshd=0 rshg=0 rsw1=130 rsw2=0 rvpoly=0 rwello=0 saref=1e-06 sbref=1e-06
++ scref=1e-06 st2vfbo=0 sta2o=0.068723 stbetedgel=0 stbetedgelw=0 stbetedgeo=1
++ stbetedgew=0 stbetl=-0.036997 stbetlw=0.0062828 stbeto=2.4165
++ stbetw=0.0046613 stbgidldo=0 stbgidlo=0 stcso=2.9406 stcto=1 stetao=0
++ stfbbtbot=-0.001 stfbbtbotd=-0.001 stfbbtgat=-0.001 stfbbtgatd=-0.001
++ stfbbtsti=-0.001 stfbbtstid=-0.001 stigo=2.9949 stmueo=0.98971
++ strso=-0.49693 stthecso=0 stthemuo=4.441e-15 stthesatl=-0.091893
++ stthesatlw=0.01292 stthesato=2.7784 stthesatw=-0.065908 stvfbedgel=0
++ stvfbedgelw=0 stvfbedgeo=0.0005 stvfbedgew=0 stvfbl=2.8624e-05
++ stvfblw=5.1435e-07 stvfbo=0.00068785 stvfbw=-1.8689e-05 stxcoro=2
++ swdelvtac=0 swedge=0 swgeo=1 swgidl=1 swigate=1 swign=1 swimpact=1
++ swjunasym=0 swjuncap=3 swjunexp=0 swnqs=0 swnud=0 thecso=1.1822
++ themuo=2.0546 thesatbo=0.08213 thesatgo=0.1146 thesatlexp=1.0316
++ thesato=0.39843 tkuo=0 toxo=2.2404e-09 toxovdo=2e-09 tr=27 trj=21
++ uo=0.045582 vbirbot=0.70829 vbirbotd=1 vbirgat=2 vbirgatd=1 vbirsti=0.79368
++ vbirstid=1 vbrbot=10 vbrbotd=10 vbrgat=10 vbrgatd=10 vbrsti=10 vbrstid=10
++ vfbedgeo=-1 vfbl=0.013965 vfblw=0.0044814 vfbo=-0.94312 vfbw=-0.027122
++ vjunref=2.5 vjunrefd=2.5 vnsubo=0 vpo=0.32224 vsbnudo=0 wbet=5.9171e-08
++ web=0 wec=0 wedge=1e-08 wedgew=0 wkuo=0 wkvtho=0 wlod=0 wlodkuo=0 wlodvth=0
++ wot=-1e-08 wseg=5.3426e-06 wsegp=1e-08 wvarl=0 wvaro=0 wvarw=0
++ xcorl=-0.11292 xcorlw=-0.014959 xcoro=0.053934 xcorw=-0.10913 xjungat=0.0001
++ xjungatd=1e-07 xjunsti=1.5783e-07 xjunstid=1e-07
+.model sg13g2_pmos pmos level=103
++ a1l=5.741 a1o=0.0001107 a1w=5.78 a2o=13.33 a3l=-0.08391 a3o=1.526
++ a3w=-0.004911 a4l=0.2771 a4o=-0.005545 a4w=0.7101 agidldw=0 agidlw=7.371e-05
++ alp1l1=0.0040221 alp1l2=1.611e-08 alp1lexp=0.6408 alp1w=-0.057981
++ alp2l1=0.005286 alp2l2=0 alp2lexp=0.25 alp2w=0.063581 alpl=0.0047346
++ alplexp=0.8468 alpnoi=2.118 alpw=-0.21042 axl=0.58095 axo=8.1825 betedgew=0
++ betw1=-0.3268 betw2=0.060181 bgidldo=41 bgidlo=15.12 cbbtbot=1e-12
++ cbbtbotd=1e-12 cbbtgat=1e-18 cbbtgatd=1e-18 cbbtsti=1e-21 cbbtstid=1e-18
++ cfbedgeo=0 cfbo=0.57877 cfdedgeo=0 cfdo=0 cfedgel=0 cfedgelexp=2 cfedgew=0
++ cfl=0.00011247 cflexp=3.0355 cfrdw=0 cfw=-0.012199 cgbovl=2.186e-17
++ cgidldo=0 cgidlo=0.02068 chibo=3.1 cjorbotd=0.001 cjorgatd=1e-09
++ cjorstid=1e-09 csl=0.34682 cslexp=1.5813 cslw=0.014762 cso=0.94214
++ csrhbot=100 csrhbotd=100 csrhgat=0.0001 csrhgatd=0.0001 csrhsti=0.0001
++ csrhstid=0.0001 csw=-0.11045 ctatbot=100 ctatbotd=100 ctatgat=0.0001
++ ctatgatd=0.0001 ctatsti=0.0001 ctatstid=0.0001 ctbo=0 ctedgel=0 ctedgelexp=1
++ ctedgeo=0 ctgo=0 ctl=0.0069387 ctlexp=1.4316 ctlw=-0.014902 cto=1.1814e-05
++ ctw=0.36122 delvtacl=0 delvtaclexp=1 delvtaclw=0 delvtaco=0 delvtacw=0
++ dlsil=0 dnsubo=0.039707 dphibedgel=0 dphibedgelexp=1 dphibedgelw=0
++ dphibedgeo=0 dphibedgew=0 dphibl=0.00020745 dphiblexp=2.9957
++ dphibo=-0.099209 dphibw=-0.00069395 dta=0 dvsbnudo=1 dwq=1.5e-08 efedgeo=1
++ efo=1 epsroxo=3.9 facneffacl=0 facneffaclw=0 facneffaco=1 facneffacw=0
++ fbbtrbot=1e+09 fbbtrbotd=1e+09 fbbtrgat=1e+09 fbbtrgatd=1e+09 fbbtrsti=1e+09
++ fbbtrstid=1e+09 fbet1=-0.2152 fbet1w=-0.065541 fbet2=-6.171 fbetedge=0
++ fetao=1 fjunq=0.03 fjunqd=0.03 fntedgeo=1 fntexcl=0 fnto=1.85
++ fol1=-0.0081173 fol2=0.0081347 frev=1000 gc2o=0.54762 gc3o=-0.29543
++ gcoo=0.01231 gfacnudl=0 gfacnudlexp=1 gfacnudlw=0 gfacnudo=1 gfacnudw=0
++ idsatrbot=2.6746e-08 idsatrbotd=1e-12 idsatrgat=0 idsatrgatd=1e-18
++ idsatrsti=1.1115e-15 idsatrstid=1e-18 iginvlw=5102.73 igovdw=0 igovw=1327
++ imax=0.0016551 kuo=0 kuowel=0 kuowelw=0 kuoweo=0 kuowew=0 kvsat=0 kvtho=0
++ kvthowel=0 kvthowelw=0 kvthoweo=0 kvthowew=0 lap=2.5254e-08 lintnoi=1e-08
++ lkuo=0 lkvtho=0 llodkuo=0 llodvth=0 lodetao=1 lov=2.5254e-08 lovd=0
++ lp1=0.00019766 lp1w=0 lp2=1.2564e-08 lpck=1.1576e-10 lpckw=-0.022414
++ lpedge=1e-08 lvarl=-0.03438 lvaro=9.695e-08 lvarw=0 mefftatbot=10
++ mefftatbotd=0.25 mefftatgat=0.25 mefftatgatd=0.25 mefftatsti=4.363
++ mefftatstid=0.25 mueo=2.3326 muew=-0.067414 munqso=1 nfaedgelw=8e+22
++ nfalw=2.209e+26 nfbedgelw=3e+07 nfblw=5.723e+08 nfcedgelw=0 nfclw=5.641e-07
++ novdo=5e+25 novo=3.104e+25 npck=5.7416e+24 npckw=-1 npl=-0.095923
++ npo=1.2699e+26 nslpo=0.05 nsubedgel=0 nsubedgelexp=1 nsubedgelw=0
++ nsubedgeo=5e+23 nsubedgew=0 nsubo=4.6011e+23 nsubw=-0.013639 pbot=0.3618
++ pbotd=0.5 pbrbot=4 pbrbotd=4 pbrgat=4 pbrgatd=4 pbrsti=4 pbrstid=4
++ pgat=0.6475 pgatd=0.5 phigbot=1.204 phigbotd=1.16 phiggat=1.65 phiggatd=1.16
++ phigsti=0.8186 phigstid=1.16 pkuo=0 pkvtho=0 pscebedgeo=0 pscebo=0
++ pscededgeo=0 pscedo=0 psceedgel=0 psceedgelexp=2 psceedgew=0 pscel=0
++ pscelexp=2 pscew=0 psti=0.2548 pstid=0.5 qmc=1 rbulko=0 rgo=0 rint=1e-12
++ rjundo=0 rjunso=0 rsbo=0.06 rsgo=0.495 rsh=0 rshd=0 rshg=0 rsw1=697.38
++ rsw2=-0.088444 rvpoly=0 rwello=0 saref=1e-06 sbref=1e-06 scref=1e-06
++ st2vfbo=0 sta2o=2 stbetedgel=0 stbetedgelw=0 stbetedgeo=1 stbetedgew=0
++ stbetl=-0.037605 stbetlw=0.0013663 stbeto=1.6974 stbetw=-0.0083384
++ stbgidldo=0 stbgidlo=-0.0014941 stcso=1.0269 stcto=1 stetao=0
++ stfbbtbot=-0.001 stfbbtbotd=-0.001 stfbbtgat=-0.001 stfbbtgatd=-0.001
++ stfbbtsti=-0.001 stfbbtstid=-0.001 stigo=2.3506 stmueo=0.84805 strso=-0.3508
++ stthecso=0 stthemuo=4.441e-15 stthesatl=-1.9651 stthesatlw=0.07117
++ stthesato=12.733 stthesatw=-0.047465 stvfbedgel=0 stvfbedgelw=0
++ stvfbedgeo=0.0005 stvfbedgew=0 stvfbl=2.4487e-06 stvfblw=2.2668e-07
++ stvfbo=0.00075111 stvfbw=6.217e-06 stxcoro=2.7756e-17 swdelvtac=0 swedge=0
++ swgeo=1 swgidl=1 swigate=1 swign=1 swimpact=1 swjunasym=0 swjuncap=3
++ swjunexp=0 swnqs=0 swnud=0 thecso=1.4566 themuo=1.3169 thesatbo=0 thesatgo=0
++ thesatlexp=2.4434 thesato=0.099164 tkuo=0 toxo=1.9704e-09 toxovdo=2e-09
++ tr=27 trj=21 uo=0.017232 vbirbot=0.7686 vbirbotd=1 vbirgat=1.399 vbirgatd=1
++ vbirsti=1.7036 vbirstid=1 vbrbot=10 vbrbotd=10 vbrgat=10 vbrgatd=10
++ vbrsti=10 vbrstid=10 vfbedgeo=-1 vfbl=0.0089886 vfblw=0.004075 vfbo=-0.88703
++ vfbw=0.0071805 vjunref=2.5 vjunrefd=2.5 vnsubo=0 vpo=7.3803e-06 vsbnudo=0
++ wbet=5.424e-10 web=0 wec=0 wedge=1e-08 wedgew=0 wkuo=0 wkvtho=0 wlod=0
++ wlodkuo=0 wlodvth=0 wot=1.5e-08 wseg=1.058e-08 wsegp=1e-10 wvarl=0 wvaro=0
++ wvarw=0 xcorl=0.11698 xcorlw=0.029574 xcoro=0.092591 xcorw=-0.095907
++ xjungat=9.105e-05 xjungatd=1e-07 xjunsti=6.292e-08 xjunstid=1e-07

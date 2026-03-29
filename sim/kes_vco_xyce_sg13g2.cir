@@ -11,7 +11,7 @@
 * Requires IHP-Open-PDK installed at $PDK_ROOT/ihp-sg13g2.
 * The cornerMOSlv library provides TT/SS/FF/SF/FS corners.
 **********************************************************************
-.LIB "/usr/local/src/pdks/ihp-sg13g2/ihp-sg13g2/libs.tech/xyce/models/cornerMOSlv.lib" mos_tt
+.include "/tmp/sg13g2_models.lib"
 
 **********************************************************************
 * VCO subcircuits
@@ -21,17 +21,17 @@
 .SUBCKT kestrel_delay_cell outp outn inp inn vctrl vbn vdd vss
 
 * Tail current source (L=0.5u for analog matching)
-Xtail  tail  vbn  vss  vss  sg13_lv_nmos W=4u L=0.5u
+Mtail  tail  vbn  vss  vss  sg13g2_nmos W=4u L=0.5u
 
 * Differential pair — sized for gm > gm_load to ensure oscillation
-Xn1    outn  inp  tail vss  sg13_lv_nmos W=2u L=0.34u
-Xn2    outp  inn  tail vss  sg13_lv_nmos W=2u L=0.34u
+Mn1    outn  inp  tail vss  sg13g2_nmos W=2u L=0.34u
+Mn2    outp  inn  tail vss  sg13g2_nmos W=2u L=0.34u
 
 * Symmetric load (Maneatis) — diode + Vctrl-controlled PFET pair
-Xp1a   outn  outn vdd  vdd  sg13_lv_pmos W=3u L=0.5u
-Xp1b   outn  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
-Xp2a   outp  outp vdd  vdd  sg13_lv_pmos W=3u L=0.5u
-Xp2b   outp  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
+Mp1a   outn  outn vdd  vdd  sg13g2_pmos W=3u L=0.5u
+Mp1b   outn  vctrl vdd vdd  sg13g2_pmos W=3u L=0.5u
+Mp2a   outp  outp vdd  vdd  sg13g2_pmos W=3u L=0.5u
+Mp2b   outp  vctrl vdd vdd  sg13g2_pmos W=3u L=0.5u
 
 .ENDS kestrel_delay_cell
 
@@ -40,11 +40,11 @@ Xp2b   outp  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
 .SUBCKT kestrel_vco_bias vbn vctrl vdd vss
 
 * Diode NFET — mirrors tail current
-Xrep_n   vbn  vbn  vss  vss  sg13_lv_nmos W=2u L=0.5u
+Mrep_n   vbn  vbn  vss  vss  sg13g2_nmos W=2u L=0.5u
 * Diode PFET load (matches Xp1a/Xp2a in delay cell)
-Xrep_pd  vbn  vbn  vdd  vdd  sg13_lv_pmos W=3u L=0.5u
+Mrep_pd  vbn  vbn  vdd  vdd  sg13g2_pmos W=3u L=0.5u
 * Vctrl-controlled PFET load (matches Xp1b/Xp2b in delay cell)
-Xrep_pc  vbn  vctrl vdd vdd  sg13_lv_pmos W=3u L=0.5u
+Mrep_pc  vbn  vctrl vdd vdd  sg13g2_pmos W=3u L=0.5u
 * Startup current to avoid degenerate vbn=0 solution
 Istart vdd vbn 5u
 
