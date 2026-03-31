@@ -15,7 +15,8 @@ Each subcircuit is a structurally correct transistor-level implementation:
 
 import os
 import math
-from ..design.engine import PLLDesign, get_process_params, format_eng
+from kestrel.process import get_process_params, format_eng
+from ..engine import PLLDesign
 
 
 def emit_spice(design: PLLDesign, output_dir: str) -> list:

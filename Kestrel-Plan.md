@@ -1,8 +1,30 @@
-# Kestrel — Open-Source PLL Generator
+# Kestrel — Open-Source Circuit Generator Framework
 
-**Parametric PLL synthesis: specs in, behavioral model + SPICE + schematic out.**
+**Parametric circuit synthesis: specs in, behavioral model + SPICE + schematic out.**
 
-Kestrel generates Phase-Locked Loop designs from a high-level specification.
+Kestrel is a plugin-based generator framework.  Each generator takes a
+high-level specification and emits SPICE netlists, schematics, and layout.
+
+**Built-in generators:**
+- **PLL** — charge-pump PLL (Maneatis topology)
+
+**External plugins** (via `KESTREL_PLUGINS` env var):
+- **grail** (`/usr/local/src/grail`) — 2:1 resonant SC power pad for DVFS
+
+### Usage
+
+```bash
+# PLL generator
+kestrel pll gen --freq-min 800M --freq-max 1.2G --ref-freq 25M --loop-bw 5M
+
+# Grail generator (external plugin)
+KESTREL_PLUGINS=/usr/local/src/grail kestrel grail gen \
+    --v-in 1.2 --v-core 0.6 --i-avg 10m --f-fire-min 500M
+```
+
+## PLL Generator
+
+Kestrel's PLL generator produces Phase-Locked Loop designs from a specification.
 Given target frequency range, jitter budget, loop bandwidth, and process node,
 Kestrel emits:
 
@@ -175,23 +197,31 @@ the user to supply their own NDA'd PDK files.
 
 ## Project Structure
 
+Kestrel is a multi-generator framework.  PLL is the built-in reference
+generator; external generators (like grail) register as plugins via
+the `KESTREL_PLUGINS` environment variable.
+
 ```
 kestrel/
 ├── kestrel/
 │   ├── __init__.py              # Package init, version
-│   ├── cli.py                   # Command-line interface (gen, gui)
+│   ├── __main__.py              # python -m kestrel entry point
+│   ├── cli.py                   # Generic dispatcher (kestrel <gen> gen ...)
 │   ├── spec.py                  # SI suffix parsing (parse_freq, parse_time)
-│   ├── gui.py                   # Tkinter interactive GUI
-│   ├── design/
-│   │   ├── __init__.py
-│   │   └── engine.py            # PLL design engine (PLLSpec, PLLDesign, design_pll)
-│   └── models/
-│       ├── __init__.py
-│       ├── behavioral.py        # Behavioral SPICE emitter (template-based)
-│       ├── spice.py             # Transistor-level SPICE netlist emitter
-│       ├── verilog_ams.py       # Verilog-AMS model emitter
-│       ├── schematic.py         # SVG / KiCad schematic emitter
-│       └── templates/           # SPICE and KiCad templates
+│   ├── gui.py                   # Dynamic GUI — fields from active plugin
+│   ├── process.py               # Shared process params (sky130, gf180, sg13g2)
+│   ├── plugins.py               # Plugin discovery (built-in + KESTREL_PLUGINS)
+│   ├── schematic.py             # Shared SVG drawing primitives
+│   └── generators/
+│       └── pll/
+│           ├── kestrel_plugin.py    # PLL plugin registration
+│           ├── engine.py            # PLLSpec, PLLDesign, design_pll
+│           └── models/
+│               ├── behavioral.py    # Behavioral SPICE emitter
+│               ├── spice.py         # Transistor-level SPICE netlist
+│               ├── verilog_ams.py   # Verilog-AMS model emitter
+│               ├── schematic.py     # SVG / KiCad PLL schematics
+│               └── templates/       # SPICE and KiCad templates
 ├── sim/
 │   ├── kes_vco.va               # Van der Pol VCO (Verilog-A / OSDI)
 │   ├── kes_cp.va                # Charge pump (Verilog-A / OSDI)

@@ -11,7 +11,8 @@ The component values (Kvco, R, C1, C2, N) come from the design engine.
 import os
 import re
 
-from ..design.engine import PLLDesign, format_eng
+from kestrel.process import format_eng
+from ..engine import PLLDesign
 from .spice import _eng
 
 

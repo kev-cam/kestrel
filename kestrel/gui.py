@@ -1,195 +1,159 @@
-"""Tkinter GUI for collecting PLL specifications and generating outputs."""
+"""Tkinter GUI for Kestrel circuit generators."""
 
+import argparse
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
-from .design.engine import PLLSpec, design_pll, summarize
-from .models.verilog_ams import emit_verilog_ams
-from .models.spice import emit_spice
-from .spec import parse_freq, parse_time
+from .plugins import discover_generators
 
-
-# ---------------------------------------------------------------------------
-# Main window
-# ---------------------------------------------------------------------------
 
 class KestrelGUI:
-    """PLL specification entry and generation GUI."""
+    """Dynamic generator GUI — fields come from the active plugin."""
 
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Kestrel PLL Generator")
+        self.root.title("Kestrel Circuit Generator")
         self.root.resizable(True, True)
 
+        self.generators = discover_generators()
+        self.active_gen = None
+        self.fields = {}
+        self.combos = {}
+
+        self._build_selector()
         self._build_spec_frame()
         self._build_button_frame()
         self._build_output_frame()
 
-        self.design = None
+        # Select first generator
+        if self.generators:
+            first = next(iter(self.generators))
+            self.gen_var.set(first)
+            self._on_generator_changed()
 
-    # ----- layout -----
+    def _build_selector(self):
+        frame = ttk.Frame(self.root, padding=5)
+        frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+
+        ttk.Label(frame, text="Generator:").pack(side="left", padx=(0, 5))
+        self.gen_var = tk.StringVar()
+        combo = ttk.Combobox(
+            frame, textvariable=self.gen_var,
+            values=list(self.generators.keys()),
+            state="readonly", width=20,
+        )
+        combo.pack(side="left")
+        combo.bind("<<ComboboxSelected>>", lambda e: self._on_generator_changed())
+
+        self.gen_desc = ttk.Label(frame, text="", foreground="gray")
+        self.gen_desc.pack(side="left", padx=(10, 0))
 
     def _build_spec_frame(self):
-        frame = ttk.LabelFrame(self.root, text="PLL Specification", padding=10)
-        frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
-        frame.columnconfigure(1, weight=1)
-
-        entries = [
-            ("Freq min:",       "freq_min",  "800M",    "Hz (e.g. 800M, 1G, 500k)"),
-            ("Freq max:",       "freq_max",  "1.2G",    "Hz"),
-            ("Reference freq:", "ref_freq",  "25M",     "Hz"),
-            ("Loop bandwidth:", "loop_bw",   "5M",      "Hz"),
-            ("Phase margin:",   "pm",        "60",      "degrees"),
-            ("Jitter target:",  "jitter",    "5p",      "s rms (blank = unconstrained)"),
-            ("Supply voltage:", "vdd",       "1.8",     "V"),
-        ]
-
-        self.fields = {}
-        for row, (label, key, default, hint) in enumerate(entries):
-            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="e", padx=(0, 5))
-            var = tk.StringVar(value=default)
-            ent = ttk.Entry(frame, textvariable=var, width=14)
-            ent.grid(row=row, column=1, sticky="w")
-            ttk.Label(frame, text=hint, foreground="gray").grid(row=row, column=2, sticky="w", padx=(5, 0))
-            self.fields[key] = var
-
-        # VCO type
-        row = len(entries)
-        ttk.Label(frame, text="VCO type:").grid(row=row, column=0, sticky="e", padx=(0, 5))
-        self.vco_type = tk.StringVar(value="ring")
-        combo = ttk.Combobox(frame, textvariable=self.vco_type,
-                             values=["ring", "lc"], state="readonly", width=12)
-        combo.grid(row=row, column=1, sticky="w")
-
-        # VCO stages
-        row += 1
-        ttk.Label(frame, text="VCO stages:").grid(row=row, column=0, sticky="e", padx=(0, 5))
-        self.vco_stages = tk.StringVar(value="4")
-        ttk.Entry(frame, textvariable=self.vco_stages, width=14).grid(row=row, column=1, sticky="w")
-        ttk.Label(frame, text="(ring only)", foreground="gray").grid(row=row, column=2, sticky="w", padx=(5, 0))
-
-        # Process
-        row += 1
-        ttk.Label(frame, text="Process:").grid(row=row, column=0, sticky="e", padx=(0, 5))
-        self.process = tk.StringVar(value="sky130")
-        combo2 = ttk.Combobox(frame, textvariable=self.process,
-                              values=["sky130", "gf180"], state="readonly", width=12)
-        combo2.grid(row=row, column=1, sticky="w")
+        self.spec_frame = ttk.LabelFrame(self.root, text="Specification", padding=10)
+        self.spec_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        self.spec_frame.columnconfigure(1, weight=1)
 
     def _build_button_frame(self):
         frame = ttk.Frame(self.root, padding=5)
-        frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
-
-        ttk.Button(frame, text="Design", command=self._on_design).pack(side="left", padx=5)
-        ttk.Button(frame, text="Generate Verilog-AMS", command=self._on_generate_vams).pack(side="left", padx=5)
-        ttk.Button(frame, text="Generate SPICE", command=self._on_generate_spice).pack(side="left", padx=5)
-        ttk.Button(frame, text="Generate All", command=self._on_generate_all).pack(side="left", padx=5)
-        ttk.Button(frame, text="Save Summary...", command=self._on_save_summary).pack(side="left", padx=5)
+        frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        ttk.Button(frame, text="Generate", command=self._on_generate).pack(side="left", padx=5)
 
     def _build_output_frame(self):
-        frame = ttk.LabelFrame(self.root, text="Design Summary", padding=10)
-        frame.grid(row=2, column=0, padx=10, pady=5, sticky="nsew")
-        self.root.rowconfigure(2, weight=1)
+        frame = ttk.LabelFrame(self.root, text="Output", padding=10)
+        frame.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
+        self.root.rowconfigure(3, weight=1)
         self.root.columnconfigure(0, weight=1)
 
-        self.output_text = scrolledtext.ScrolledText(frame, width=60, height=20,
-                                                      font=("Courier", 10))
+        self.output_text = scrolledtext.ScrolledText(
+            frame, width=70, height=20, font=("Courier", 10),
+        )
         self.output_text.pack(fill="both", expand=True)
 
-    # ----- actions -----
+    def _on_generator_changed(self):
+        name = self.gen_var.get()
+        if name not in self.generators:
+            return
+        reg = self.generators[name]
+        self.active_gen = reg
+        self.gen_desc.config(text=reg.get("description", ""))
 
-    def _read_spec(self) -> PLLSpec:
-        """Parse GUI fields into a PLLSpec."""
-        jitter_text = self.fields["jitter"].get().strip()
-        jitter = parse_time(jitter_text) if jitter_text else None
+        # Clear old fields
+        for w in self.spec_frame.winfo_children():
+            w.destroy()
+        self.fields.clear()
+        self.combos.clear()
 
-        return PLLSpec(
-            freq_min=parse_freq(self.fields["freq_min"].get()),
-            freq_max=parse_freq(self.fields["freq_max"].get()),
-            ref_freq=parse_freq(self.fields["ref_freq"].get()),
-            loop_bw=parse_freq(self.fields["loop_bw"].get()),
-            phase_margin=float(self.fields["pm"].get()),
-            jitter_target=jitter,
-            vco_type=self.vco_type.get(),
-            vco_stages=int(self.vco_stages.get()),
-            supply_voltage=float(self.fields["vdd"].get()),
-            process=self.process.get(),
-        )
-
-    def _on_design(self):
-        try:
-            spec = self._read_spec()
-        except (ValueError, KeyError) as e:
-            messagebox.showerror("Invalid spec", str(e))
+        # Build fields from plugin
+        gui_fields_fn = reg.get("gui_fields")
+        if not gui_fields_fn:
+            ttk.Label(self.spec_frame, text="(no GUI fields defined)").grid(row=0, column=0)
             return
 
-        self.design = design_pll(spec)
-        summary = summarize(self.design)
+        field_defs = gui_fields_fn()
+        row = 0
+
+        for entry in field_defs.get("entries", []):
+            ttk.Label(self.spec_frame, text=entry["label"]).grid(row=row, column=0, sticky="e", padx=(0, 5))
+            var = tk.StringVar(value=entry.get("default", ""))
+            ttk.Entry(self.spec_frame, textvariable=var, width=14).grid(row=row, column=1, sticky="w")
+            hint = entry.get("hint", "")
+            if hint:
+                ttk.Label(self.spec_frame, text=hint, foreground="gray").grid(row=row, column=2, sticky="w", padx=(5, 0))
+            self.fields[entry["key"]] = var
+            row += 1
+
+        for combo_def in field_defs.get("combos", []):
+            ttk.Label(self.spec_frame, text=combo_def["label"]).grid(row=row, column=0, sticky="e", padx=(0, 5))
+            var = tk.StringVar(value=combo_def.get("default", ""))
+            ttk.Combobox(
+                self.spec_frame, textvariable=var,
+                values=combo_def.get("choices", []),
+                state="readonly", width=12,
+            ).grid(row=row, column=1, sticky="w")
+            self.combos[combo_def["key"]] = var
+            row += 1
+
+        for extra in field_defs.get("extras", []):
+            ttk.Label(self.spec_frame, text=extra["label"]).grid(row=row, column=0, sticky="e", padx=(0, 5))
+            var = tk.StringVar(value=extra.get("default", ""))
+            ttk.Entry(self.spec_frame, textvariable=var, width=14).grid(row=row, column=1, sticky="w")
+            hint = extra.get("hint", "")
+            if hint:
+                ttk.Label(self.spec_frame, text=hint, foreground="gray").grid(row=row, column=2, sticky="w", padx=(5, 0))
+            self.fields[extra["key"]] = var
+            row += 1
+
+    def _on_generate(self):
+        if not self.active_gen:
+            messagebox.showwarning("No generator", "Select a generator first.")
+            return
+
+        out_dir = filedialog.askdirectory(title="Select output directory")
+        if not out_dir:
+            return
+
+        # Build a synthetic args namespace from fields
+        args = argparse.Namespace()
+        for key, var in self.fields.items():
+            setattr(args, key.replace("-", "_"), var.get())
+        for key, var in self.combos.items():
+            setattr(args, key.replace("-", "_"), var.get())
+        args.output = out_dir
 
         self.output_text.delete("1.0", "end")
-        self.output_text.insert("1.0", summary)
 
-    def _ensure_design(self):
-        if not self.design:
-            self._on_design()
-        return self.design is not None
-
-    def _on_generate_vams(self):
-        if not self._ensure_design():
-            return
-        out_dir = filedialog.askdirectory(title="Select output directory")
-        if not out_dir:
-            return
+        # Capture print output
+        import io
+        import contextlib
+        buf = io.StringIO()
         try:
-            files = emit_verilog_ams(self.design, out_dir)
-            msg = "Verilog-AMS files:\n" + "\n".join(f"  {os.path.basename(f)}" for f in files)
-            self.output_text.insert("end", f"\n\n{msg}\n")
-            messagebox.showinfo("Success", msg)
+            with contextlib.redirect_stdout(buf):
+                self.active_gen["run"](args)
+            self.output_text.insert("1.0", buf.getvalue())
         except Exception as e:
+            self.output_text.insert("1.0", f"Error: {e}\n")
             messagebox.showerror("Generation error", str(e))
-
-    def _on_generate_spice(self):
-        if not self._ensure_design():
-            return
-        out_dir = filedialog.askdirectory(title="Select output directory")
-        if not out_dir:
-            return
-        try:
-            files = emit_spice(self.design, out_dir)
-            msg = "SPICE files:\n" + "\n".join(f"  {os.path.basename(f)}" for f in files)
-            self.output_text.insert("end", f"\n\n{msg}\n")
-            messagebox.showinfo("Success", msg)
-        except Exception as e:
-            messagebox.showerror("Generation error", str(e))
-
-    def _on_generate_all(self):
-        if not self._ensure_design():
-            return
-        out_dir = filedialog.askdirectory(title="Select output directory")
-        if not out_dir:
-            return
-        try:
-            files = emit_verilog_ams(self.design, out_dir)
-            files += emit_spice(self.design, out_dir)
-            msg = "Generated files:\n" + "\n".join(f"  {os.path.basename(f)}" for f in files)
-            self.output_text.insert("end", f"\n\n{msg}\n")
-            messagebox.showinfo("Success", msg)
-        except Exception as e:
-            messagebox.showerror("Generation error", str(e))
-
-    def _on_save_summary(self):
-        if not self.design:
-            messagebox.showwarning("No design", "Run Design first.")
-            return
-        path = filedialog.asksaveasfilename(
-            title="Save summary",
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-        )
-        if path:
-            with open(path, "w") as f:
-                f.write(self.output_text.get("1.0", "end"))
 
     def run(self):
         self.root.mainloop()

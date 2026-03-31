@@ -5,7 +5,8 @@ design parameters.
 """
 
 import os
-from ..design.engine import PLLDesign, format_eng, get_process_params
+from kestrel.process import format_eng, get_process_params
+from ..engine import PLLDesign
 
 
 # ---------------------------------------------------------------------------

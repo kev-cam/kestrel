@@ -15,7 +15,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kestrel.design.engine import PLLSpec, design_pll, summarize, format_eng
+from kestrel.generators.pll.engine import PLLSpec, design_pll, summarize
+from kestrel.process import format_eng
 from layout.gds_gen import generate_pll_gds
 from layout.parasitics import compute_parasitics, analyze_impact
 

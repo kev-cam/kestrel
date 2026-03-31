@@ -5,8 +5,8 @@ import os, re, sys, tempfile, shutil
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from kestrel.design.engine import PLLSpec, PLLDesign, design_pll
-from kestrel.models.behavioral import (
+from kestrel.generators.pll.engine import PLLSpec, PLLDesign, design_pll
+from kestrel.generators.pll.models.behavioral import (
     _fill_template, _design_to_params, emit_behavioral, emit_kicad_sch,
 )
 
@@ -33,7 +33,7 @@ def _make_design():
     return design_pll(spec)
 
 
-# ── Test: design_to_params produces all required keys ────────────────
+# -- Test: design_to_params produces all required keys ----
 
 def test_params_complete():
     design = _make_design()
@@ -50,7 +50,7 @@ def test_params_complete():
         check(f'param {k} is non-empty string', isinstance(v, str) and len(v) > 0)
 
 
-# ── Test: no stale @PARAM@ in generated output ──────────────────────
+# -- Test: no stale @PARAM@ in generated output ----
 
 def test_no_stale_placeholders():
     design = _make_design()
@@ -63,7 +63,7 @@ def test_no_stale_placeholders():
               f'found: {stale}')
 
 
-# ── Test: .cir has required SPICE directives ─────────────────────────
+# -- Test: .cir has required SPICE directives ----
 
 def test_spice_directives():
     design = _make_design()
@@ -77,7 +77,7 @@ def test_spice_directives():
     check('cir: has Bpd', 'Bpd' in text)
 
 
-# ── Test: .kicad_sch has balanced parentheses ────────────────────────
+# -- Test: .kicad_sch has balanced parentheses ----
 
 def test_kicad_balanced():
     design = _make_design()
@@ -94,7 +94,7 @@ def test_kicad_balanced():
     check('kicad_sch: balanced parens', depth == 0, f'depth={depth}')
 
 
-# ── Test: emit_behavioral writes file ────────────────────────────────
+# -- Test: emit_behavioral writes file ----
 
 def test_emit_behavioral():
     design = _make_design()
@@ -110,7 +110,7 @@ def test_emit_behavioral():
         shutil.rmtree(tmpdir)
 
 
-# ── Test: emit_kicad_sch writes file ─────────────────────────────────
+# -- Test: emit_kicad_sch writes file ----
 
 def test_emit_kicad_sch():
     design = _make_design()
@@ -125,7 +125,7 @@ def test_emit_kicad_sch():
         shutil.rmtree(tmpdir)
 
 
-# ── Test: design values are physically reasonable ────────────────────
+# -- Test: design values are physically reasonable ----
 
 def test_design_values_reasonable():
     design = _make_design()
@@ -135,7 +135,7 @@ def test_design_values_reasonable():
     check('ref_freq param present', len(params['REF_FREQ']) > 0)
 
 
-# ── Test: missing param raises ValueError ────────────────────────────
+# -- Test: missing param raises ValueError ----
 
 def test_missing_param():
     try:
@@ -145,7 +145,7 @@ def test_missing_param():
         check('missing params raises ValueError', True)
 
 
-# ── Run ──────────────────────────────────────────────────────────────
+# -- Run ----
 
 if __name__ == '__main__':
     print("=== kestrel behavioral emitter tests ===\n")

@@ -6,7 +6,7 @@ loop filter, divider) is a parameterized cell built from MOSFET
 primitives with sky130 layer definitions.
 
 Usage:
-    from kestrel.design.engine import PLLSpec, design_pll
+    from kestrel.generators.pll.engine import PLLSpec, design_pll
     from layout.gds_gen import generate_pll_gds
 
     spec = PLLSpec(freq_min=400e6, freq_max=800e6, ref_freq=10e6,
@@ -1253,7 +1253,7 @@ def generate_pll_gds(design, output_path: str = "kestrel_pll.gds") -> str:
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, "/usr/local/src/kestrel")
-    from kestrel.design.engine import PLLSpec, design_pll, summarize
+    from kestrel.generators.pll.engine import PLLSpec, design_pll, summarize
 
     spec = PLLSpec(
         freq_min=400e6,

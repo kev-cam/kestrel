@@ -2,7 +2,8 @@
 
 import math
 import os
-from ..design.engine import PLLDesign, format_eng
+from kestrel.process import format_eng
+from ..engine import PLLDesign
 
 
 def emit_verilog_ams(design: PLLDesign, output_dir: str) -> list:
