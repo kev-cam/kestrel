@@ -10,3 +10,9 @@ kestrel = "kestrel.cli:main"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+# Only the kestrel package is a distribution; sch/ sim/ layout/ tests/ are
+# assets/testbenches, not importable packages. Without this, setuptools
+# flat-layout auto-discovery errors ("Multiple top-level packages discovered").
+[tool.setuptools.packages.find]
+include = ["kestrel*"]
