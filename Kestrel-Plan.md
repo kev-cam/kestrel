@@ -14,8 +14,13 @@ high-level specification and emits SPICE netlists, schematics, and layout.
 ### Usage
 
 ```bash
-# PLL generator
+# PLL generator (sky130 default)
 kestrel pll gen --freq-min 800M --freq-max 1.2G --ref-freq 25M --loop-bw 5M
+
+# IHP SG13G2: models are bundled, the output simulates as-is
+kestrel pll gen --freq-min 560M --freq-max 720M --ref-freq 20M --loop-bw 2M --process sg13g2
+(cd kestrel_out && Xyce kestrel_vco_tb.sp)   # open-loop VCO sweep
+(cd kestrel_out && Xyce kestrel_tb.sp)       # closed loop
 
 # Grail generator (external plugin)
 KESTREL_PLUGINS=/usr/local/src/grail kestrel grail gen \
@@ -37,7 +42,7 @@ Kestrel emits:
 All outputs are parametrically consistent — the same computed component values
 drive every representation.
 
-## Current Status (March 2026)
+## Current Status (March 2026, SG13G2 path updated November 2026)
 
 ### Working
 
@@ -49,7 +54,21 @@ drive every representation.
 - **Verilog-AMS emitter** (`kestrel/models/verilog_ams.py`) — generates VCO,
   PFD, charge pump, loop filter, divider modules.
 - **SPICE netlist emitter** (`kestrel/models/spice.py`) — full transistor-level
-  netlist for all PLL blocks with testbench.
+  netlist for all PLL blocks with testbench.  Emits a self-biased replica
+  bias that tracks Vctrl (same topology as the validated `sim/` decks),
+  differential-to-CMOS output buffers on the VCO (the static divider
+  needs rail-to-rail clocks at any Vctrl), a six-NAND edge-triggered
+  flip-flop with asynchronous reset used by the PFD and as the divider's
+  toggle stage, an open-loop VCO characterization deck
+  (`kestrel_vco_tb.sp`), and swaps the charge-pump UP/DN inputs for VCOs
+  with negative Kvco.
+- **IHP SG13G2 transistor-level path** (November 2026) — Xyce-native PSP103
+  TT cards plus wrappers with IHP's `sg13_lv_nmos/pmos` subcircuit
+  interface, bundled in `sim/models/` and copied next to every generated
+  netlist.  `kestrel pll gen --process sg13g2` output parses and runs in
+  Xyce unmodified; the generated VCO is verified at 844 MHz (Vctrl 0.20 V)
+  to 517 MHz (0.50 V).  Process-calibrated sizing lives in
+  `kestrel/process.py` (`vco_calibration`).
 - **Behavioral emitter** (`kestrel/models/behavioral.py`) — template-based
   behavioral SPICE output.
 - **KiCad schematic emitter** (`kestrel/models/schematic.py`) — SVG and
@@ -74,12 +93,12 @@ drive every representation.
 
 ### Key Results
 
-| Metric | Behavioral | Transistor (sky130) |
-|--------|-----------|---------------------|
-| VCO range | 71–1056 MHz | 477–789 MHz |
-| Kvco | ~707 MHz/V (linear) | ~298 MHz/V (saturating) |
-| Valid Vctrl | 0.1–1.5 V | 0.7–1.5 V |
-| Simulator | ngspice + OSDI | Xyce |
+| Metric | Behavioral | Transistor (sky130) | Transistor (SG13G2, generated) |
+|--------|-----------|---------------------|--------------------------------|
+| VCO range | 71–1056 MHz | 477–789 MHz | 517–844 MHz |
+| Kvco | ~707 MHz/V (linear) | ~298 MHz/V (saturating) | ~−1.09 GHz/V (monotonic, Maneatis polarity) |
+| Valid Vctrl | 0.1–1.5 V | 0.7–1.5 V | 0.2–0.5 V |
+| Simulator | ngspice + OSDI | Xyce | Xyce (PSP103) |
 
 Optimization converged in 112 evaluations (cost 0.363 → 0.249).
 Refit behavioral model matches transistor curve within ±3.3%.
@@ -110,6 +129,10 @@ Refit behavioral model matches transistor curve within ±3.3%.
 - PSL/SVA assertions
 - Probability waveform jitter model
 - LC-VCO path (inductor design, see Appendix A)
+- Programmable feedback divider: the emitted chain divides by 2^n, so
+  closed-loop runs need a spec whose nominal N is a power of two
+- sky130 generated netlists still need the PDK's subcircuit model mapping
+  (the bundled `sim/models` sky130 cards are binned `__model.N` names)
 
 ## Architecture
 
@@ -183,12 +206,25 @@ Schematic netlist (from design engine)
   integrated and tested with Xyce (binned models, TT corner).
 - **GlobalFoundries GF180MCU** — open 180nm MCU process.
   Supported in design engine; transistor-level sim not yet validated.
-- **IHP SG13G2** — open 130nm SiGe BiCMOS (low-voltage 1.2V CMOS).
-  PSP models via IHP-Open-PDK Xyce libs. Design engine sized with
-  kpn=299uA/V², vtn=0.255V, kpp=82uA/V², vtp=0.353V.
-  VCO testbench: `sim/kes_vco_xyce_sg13g2.cir`.
-  Requires `$PDK_ROOT/ihp-sg13g2` (see
-  https://github.com/IHP-GmbH/IHP-Open-PDK).
+- **IHP SG13G2** — open 130nm SiGe BiCMOS (low-voltage 1.2V CMOS,
+  PSP 103 models, Apache-2.0 IHP-Open-PDK).  Nothing to install: the TT
+  model cards are bundled as Xyce-native level-103 `.model`s
+  (`sim/models/sg13g2_psp103_tt.lib`, all 341 numeric parameters identical
+  to IHP's `mos_tt` section with the corner multipliers evaluated) behind
+  wrappers that reproduce IHP's `sg13_lv_nmos / sg13_lv_pmos  d g s b
+  w= l= ng= m=` interface with the PDK's default source/drain areas
+  (`sim/models/sg13g2_lv.lib`).  IHP's own `libs.tech/xyce` library needs
+  the `YPSP103_VA` device that stock Xyce builds do not have, which is why
+  the flattened cards are used.  Design engine: kpn=299uA/V², vtn=0.255V,
+  kpp=82uA/V², vtp=0.353V, plus a transistor-level `vco_calibration`
+  (tail 4u/0.5u, pair 2u/0.34u, loads 3u/0.5u) measured on the generated
+  VCO: 844 MHz at Vctrl 0.20 V falling to 517 MHz at 0.50 V, Kvco ≈ −1.09
+  GHz/V — Maneatis polarity, so the emitter swaps the charge-pump UP/DN
+  inputs.  Above ~0.55 V the curve turns back up; stay within 0.2–0.5 V.
+  Decks: `sim/kes_vco_xyce_sg13g2.cir` (hand sizing, no junction areas,
+  17-point sweep ≈ 16 min) and the generated `kestrel_vco_tb.sp`.  Note:
+  on a Xyce that supplies PSP103 through the Verilog-A `.HDL` path (PyMS)
+  every run pays a ~2 min model compile before the transient starts.
 
 ### Commercial PDKs (Roadmap)
 
@@ -231,7 +267,7 @@ kestrel/
 │   ├── kes_vco_xyce.cir         # Transistor VCO testbench (Xyce + sky130)
 │   ├── kes_vco_xyce_sg13g2.cir # Transistor VCO testbench (Xyce + IHP SG13G2)
 │   ├── vco_range.sh             # VCO range sweep script
-│   ├── models/                  # sky130 BSIM4 model files
+│   ├── models/                  # sky130 BSIM4 cards; SG13G2 PSP103 cards + sg13_lv wrappers
 │   └── opt/
 │       ├── optimize_vco.py      # Sizing optimizer (main script)
 │       ├── backends.py          # Pluggable sim/extraction backends
@@ -252,7 +288,8 @@ kestrel/
 │   ├── kestrel_pll.gds               # Generated PLL layout
 │   └── kestrel_pll_flat_extracted.cir # Extracted SPICE netlist
 ├── tests/
-│   └── test_behavioral.py       # Emitter tests
+│   ├── test_behavioral.py       # Emitter tests
+│   └── test_sg13g2.py           # SG13G2 calibration, bundled models, Xyce parse check
 ├── docs/
 │   └── index.html               # Project documentation (browser)
 ├── Kestrel-Plan.md              # This file
@@ -494,6 +531,8 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
 - [x] Sizing optimization framework (Nelder-Mead)
 - [x] Behavioral model refit to match transistor curve
 - [x] KiCad schematic (delay cell)
+- [x] IHP SG13G2: bundled Xyce-native PSP103 models + IHP-interface wrappers
+- [x] IHP SG13G2: generated VCO verified in Xyce (517–844 MHz over Vctrl 0.5–0.2 V)
 
 ### M4: Layout and Extraction — IN PROGRESS
 

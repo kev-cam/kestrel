@@ -33,7 +33,9 @@ _PROCESS_PARAMS = {
     "sg13g2": {
         "nfet": "sg13_lv_nmos",
         "pfet": "sg13_lv_pmos",
-        "lmin": 340e-9,       # m — NMOS Lmin=0.34u (PMOS=0.28u, use larger)
+        "lmin": 130e-9,       # m — LV MOS min gate length; PSP cards valid for
+                              #     L = 0.13-10 um (0.34u/0.28u are only the PDK
+                              #     subckt defaults, not minimums)
         "l_analog": 500e-9,   # m — longer L for analog matching
         "kpn": 298.8e-6,      # A/V^2 — from IHP characterization (W/L=1u/1u)
         "kpp": 82.18e-6,      # A/V^2 — from IHP characterization
@@ -43,6 +45,33 @@ _PROCESS_PARAMS = {
         "model_lib": "cornerMOSlv",
         "corner": "mos_tt",
         "inst_prefix": "X",   # .SUBCKT wrappers — use X prefix
+        # Xyce-native models bundled in sim/models (flattened IHP TT PSP103
+        # cards + IHP-interface subckt wrappers).  The SPICE emitter copies
+        # them next to the generated netlist and includes them in this order,
+        # so `kestrel pll gen --process sg13g2` output simulates as-is.
+        "model_files": ["sg13g2_psp103_tt.lib", "sg13g2_lv.lib"],
+        # Transistor-level calibration (Xyce, PSP103 TT, 1.2 V, 2026-11-11).
+        # Sizing from sim/kes_vco_xyce_sg13g2.cir; the numbers below were
+        # measured on the *generated* VCO (kestrel_vco_tb.sp, sg13_lv_*
+        # wrappers with IHP's default S/D junction areas, CMOS output
+        # buffers): 844 MHz @ 0.20 V falling monotonically to 517 MHz @
+        # 0.50 V, Kvco ~ -1.09 GHz/V
+        # (Maneatis polarity: f falls as Vctrl rises), rail-to-rail CMOS
+        # outputs.  The bare M-card deck runs ~20% faster (no junction areas)
+        # and turns back up above 0.55 V, so stay within 0.2-0.5 V.  The
+        # design engine uses this block instead of the square-law estimate
+        # and the emitter swaps the charge-pump UP/DN inputs for the sign.
+        "vco_calibration": {
+            "tail_w": 4.0e-6, "tail_l": 0.5e-6,
+            "diff_w": 2.0e-6, "diff_l": 0.34e-6,
+            "load_w": 3.0e-6, "load_l": 0.5e-6,
+            "bias_w": 2.0e-6, "bias_l": 0.5e-6,
+            "i_start": 5.0e-6,
+            "kvco": -1.09e9,          # Hz/V, signed
+            "vctrl_nom": 0.35,        # V, middle of the usable range
+            "vctrl_min": 0.20, "vctrl_max": 0.50,
+            "f_min": 517e6, "f_max": 844e6,
+        },
     },
 }
 

@@ -9,7 +9,9 @@ def add_arguments(parser):
     parser.add_argument("--loop-bw", required=True, help="Loop bandwidth (e.g. 5M)")
     parser.add_argument("--phase-margin", default="60", help="Phase margin in degrees (default 60)")
     parser.add_argument("--jitter", default=None, help="Jitter target (e.g. 5p)")
-    parser.add_argument("--vdd", default="1.8", help="Supply voltage (default 1.8)")
+    parser.add_argument("--vdd", default=None,
+                        help="Supply voltage (default: process nominal — "
+                             "1.8 sky130, 3.3 gf180, 1.2 sg13g2)")
     parser.add_argument("--vco-type", default="ring", choices=["ring", "lc"])
     parser.add_argument("--vco-stages", default=4, type=int)
     parser.add_argument("--process", default="sky130", choices=["sky130", "gf180", "sg13g2"])
@@ -24,7 +26,10 @@ def run(args):
     from .models.spice import emit_spice
     from .models.behavioral import emit_behavioral, emit_kicad_sch
 
+    from kestrel.process import get_process_params
+
     jitter = parse_time(args.jitter) if args.jitter else None
+    vdd = float(args.vdd) if args.vdd else get_process_params(args.process)["vdd"]
     spec = PLLSpec(
         freq_min=parse_freq(args.freq_min),
         freq_max=parse_freq(args.freq_max),
@@ -34,7 +39,7 @@ def run(args):
         jitter_target=jitter,
         vco_type=args.vco_type,
         vco_stages=args.vco_stages,
-        supply_voltage=float(args.vdd),
+        supply_voltage=vdd,
         process=args.process,
     )
     design = design_pll(spec)
@@ -64,7 +69,7 @@ def gui_fields():
             {"label": "Loop bandwidth:", "key": "loop_bw",   "default": "5M",    "hint": "Hz"},
             {"label": "Phase margin:",   "key": "pm",        "default": "60",    "hint": "degrees"},
             {"label": "Jitter target:",  "key": "jitter",    "default": "5p",    "hint": "s rms (blank = unconstrained)"},
-            {"label": "Supply voltage:", "key": "vdd",       "default": "1.8",   "hint": "V"},
+            {"label": "Supply voltage:", "key": "vdd",       "default": "",      "hint": "V (blank = process nominal)"},
         ],
         "combos": [
             {"label": "VCO type:",  "key": "vco_type",  "default": "ring",   "choices": ["ring", "lc"]},

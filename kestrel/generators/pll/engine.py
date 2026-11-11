@@ -63,6 +63,8 @@ class PLLDesign:
     vco_bias_w: float = 0.0      # m — bias mirror NMOS width
     vco_bias_l: float = 0.0      # m — bias mirror NMOS length
     vco_i_stage: float = 0.0     # A — current per delay stage
+    vco_i_start: float = 0.0     # A — bias-generator startup current (0 = i_stage/100)
+    kvco_sign: int = 1           # +1: f rises with Vctrl; -1: Maneatis polarity (f falls)
 
     # Transistor sizing — charge pump
     cp_up_w: float = 0.0         # m — UP current source PMOS width
@@ -117,6 +119,26 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
     if kvco_schem <= 0:
         kvco_schem = d.f_center * 0.3 / (spec.supply_voltage / 2)
         d.warnings.append("freq_min == freq_max; estimated Kvco from center freq")
+
+    # --- Process calibration (transistor-level validated VCO) ---
+    # A process entry may carry a 'vco_calibration' block measured on its
+    # reference VCO deck (sim/kes_vco_xyce_<process>.cir).  When present it
+    # replaces the analytical Kvco / Vctrl estimates here and the square-law
+    # VCO sizing in _size_transistors, so the emitted VCO is one that is
+    # known to oscillate over the stated range.
+    cal = _PROCESS_PARAMS.get(spec.process, {}).get("vco_calibration")
+    if cal:
+        if cal.get("kvco"):
+            kvco_schem = abs(cal["kvco"])
+            d.kvco_sign = -1 if cal["kvco"] < 0 else 1
+        if cal.get("vctrl_nom") is not None:
+            d.vctrl_nom = cal["vctrl_nom"]
+        if cal.get("f_min") and cal.get("f_max") and \
+                not (cal["f_min"] <= d.f_center <= cal["f_max"]):
+            d.warnings.append(
+                f"{spec.process} calibrated VCO covers "
+                f"{format_eng(cal['f_min'], 'Hz')}-{format_eng(cal['f_max'], 'Hz')}; "
+                f"f_center {format_eng(d.f_center, 'Hz')} is outside that range")
 
     # Post-layout Kvco: parasitic cap attenuates frequency modulation
     # Kvco_actual = Kvco_schem * C_gate / (C_gate + C_parasitic)
@@ -307,6 +329,14 @@ def _size_transistors(d: PLLDesign):
     # Bias mirror NMOS: mirrors the tail current
     d.vco_bias_l = l_an
     d.vco_bias_w = d.vco_tail_w  # 1:1 mirror ratio
+
+    # Process calibration overrides (see design_pll): validated sizing wins
+    cal = proc.get("vco_calibration")
+    if cal:
+        for key in ("tail_w", "tail_l", "diff_w", "diff_l", "load_w", "load_l",
+                    "bias_w", "bias_l", "i_start", "i_stage"):
+            if key in cal:
+                setattr(d, "vco_" + key, cal[key])
 
     # --- Charge pump sizing ---
     # UP source (PMOS): Icp = 0.5 * kpp * (W/L) * (Vsg - |Vtp|)^2

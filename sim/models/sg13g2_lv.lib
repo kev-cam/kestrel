@@ -1,0 +1,46 @@
+* sg13g2_lv.lib — IHP SG13G2 low-voltage CMOS, Xyce-native (PSP103, level=103)
+*
+* Thin wrappers reproducing the IHP-Open-PDK subcircuit interface
+*     Xname d g s b sg13_lv_nmos|sg13_lv_pmos w= l= [ng= m= as= ad= ps= pd=]
+* on top of the flattened TT model cards in sg13g2_psp103_tt.lib, so a
+* netlist written against the official PDK (X-prefixed instances, as the
+* kestrel SPICE emitter writes for --process sg13g2) runs on any Xyce build.
+*
+* Include order (both files are copied next to generated netlists):
+*     .INCLUDE "models/sg13g2_psp103_tt.lib"
+*     .INCLUDE "models/sg13g2_lv.lib"
+*
+* Why not IHP's own libs.tech/xyce/models/cornerMOSlv.lib?  It instantiates
+* YPSP103_VA, the ADMS/Verilog-A PSP device, which stock Xyce builds (ours
+* included) do not provide.  The cards here carry the same TT parameters
+* (all 341 numeric values identical; the corner multipliers of the mos_tt
+* section are evaluated in) on Xyce's built-in level-103 PSP.
+*
+* Source/drain geometry defaults follow IHP's sg13g2_moslv_mod.lib for the
+* single-finger / odd-ng case: z1 = 0.34u contacted edge, z2 = 0.38u shared
+* edge.  Pass as/ad/ps/pd explicitly for layout-extracted values.
+*
+* Corner: TT (typical mean), 27 C.  Vds max 1.5 V, L 0.13-10 um, W 0.15-10 um.
+* Model data: Copyright 2023 IHP PDK Authors, Apache-2.0 (IHP-Open-PDK).
+
+.SUBCKT sg13_lv_nmos d g s b PARAMS: w=0.35u l=0.34u ng=1 m=1 as=0 ad=0 ps=0 pd=0
++ z1=0.34e-6 z2=0.38e-6 wmin=0.15e-6
+.PARAM wf = {max(w/ng, wmin)}
+.PARAM as_eff = {if(as > 0, as, wf*(z1 + ((ng-1)/2)*z2))}
+.PARAM ad_eff = {if(ad > 0, ad, wf*(z1 + ((ng-1)/2)*z2))}
+.PARAM ps_eff = {if(ps > 0, ps, 2*(wf*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2))}
+.PARAM pd_eff = {if(pd > 0, pd, 2*(wf*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2))}
+M1 d g s b sg13g2_nmos W={w} L={l} NF={ng} M={m}
++ AS={as_eff} AD={ad_eff} PS={ps_eff} PD={pd_eff}
+.ENDS sg13_lv_nmos
+
+.SUBCKT sg13_lv_pmos d g s b PARAMS: w=0.35u l=0.28u ng=1 m=1 as=0 ad=0 ps=0 pd=0
++ z1=0.34e-6 z2=0.38e-6 wmin=0.15e-6
+.PARAM wf = {max(w/ng, wmin)}
+.PARAM as_eff = {if(as > 0, as, wf*(z1 + ((ng-1)/2)*z2))}
+.PARAM ad_eff = {if(ad > 0, ad, wf*(z1 + ((ng-1)/2)*z2))}
+.PARAM ps_eff = {if(ps > 0, ps, 2*(wf*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2))}
+.PARAM pd_eff = {if(pd > 0, pd, 2*(wf*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2))}
+M1 d g s b sg13g2_pmos W={w} L={l} NF={ng} M={m}
++ AS={as_eff} AD={ad_eff} PS={ps_eff} PD={pd_eff}
+.ENDS sg13_lv_pmos
