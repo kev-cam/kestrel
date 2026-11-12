@@ -33,10 +33,16 @@ Kestrel's PLL generator produces Phase-Locked Loop designs from a specification.
 Given target frequency range, jitter budget, loop bandwidth, and process node,
 Kestrel emits:
 
-- Verilog-AMS behavioral model
+- Verilog-AMS behavioral model set with event-driven logic (the VCO
+  schedules the delay to its next edge; PFD and divider are logic; only the
+  charge pump and loop filter are analog) and a closed-loop testbench
+- nvc/stat-sim form of the same PLL (VHDL on stat-sim's `prob_load`
+  discipline, fully event-driven) with timing variability and a
+  Monte-Carlo runner
 - SPICE netlist (targeting Xyce, ngspice, Spectre)
 - KiCad schematic
-- Behavioral PLL testbench (ngspice/OSDI)
+- Behavioral PLL testbench for stock ngspice (XSPICE event-driven VCO,
+  PFD and divider; generated per design)
 - Transistor-level VCO testbench (Xyce + sky130 BSIM4)
 
 All outputs are parametrically consistent — the same computed component values
@@ -52,7 +58,43 @@ drive every representation.
 - **CLI** (`kestrel/cli.py`) — `kestrel gen` and `kestrel gui` subcommands.
 - **Tkinter GUI** (`kestrel/gui.py`) — interactive spec entry and generation.
 - **Verilog-AMS emitter** (`kestrel/models/verilog_ams.py`) — generates VCO,
-  PFD, charge pump, loop filter, divider modules.
+  PFD, charge pump, loop filter, divider, top and a closed-loop testbench
+  (`kestrel_tb.vams`).  Modelling rule (November 2026): behavioral models
+  are Verilog-AMS with event-driven logic, and a VCO schedules the delay to
+  its next edge from the control voltage instead of integrating a
+  frequency.  The VCO is one process — the edge travelling round the ring
+  — that reads V(vctrl) on entering each stage and waits that stage's
+  delay (td_nom/(1 + s_td·(V − vctrl_nom)), td_nom = 1/(2·N·f_center)),
+  toggling the output once round; no `idtmod`, no `$bound_step`, the
+  simulator only lands on the edges.  PFD and divider are `always` blocks
+  with `#` delays; the pump reads UP/DN in its analog block through
+  `transition()`.  Every logic block carries stat-sim variability
+  parameters (`sigma_mm` per-stage mismatch, `sigma_j` per-edge jitter,
+  `seed`, drawn from a seeded `$random` via Box–Muller), defaulting to 0.
+  Verified with Icarus Verilog (`tests/test_vams_logic.py`: the emitted
+  PFD and divider verbatim, the VCO with its control port made real, and
+  an exact event-driven stand-in for the analog pump + filter): sg13g2
+  locks at 640.0 MHz / 0.350 V, sky130 at 1000.0 MHz / 0.900 V, |ref→fb|
+  under 25 ps.
+- **stat-sim emitter** (`kestrel/models/statsim.py`) — the nvc runtime form
+  of the same PLL, in the style of stat-sim's `nvcgen.py`: VHDL entities on
+  the `prob_load` discipline (`kestrel_vco_pl`, `kestrel_pfd_pl`,
+  `kestrel_divider_pl`, `kestrel_cp_lf_pl`, `kestrel_pll_statsim`), a
+  testbench and `run_statsim.sh`.  The charge pump + R1–C1/C2 filter is
+  replaced by its exact closed form between pump events (x = drop across
+  R1 relaxes to Icp·R1·C1/(C1+C2) with τ = R1·C1·C2/(C1+C2); the C1 node
+  integrates it), so the control voltage is evaluated exactly at every VCO
+  stage edge with no analog solver.  Variability generics: `SIGMA_MM`,
+  `SIGMA_J`, `SIGMA_ICP` (UP/DN current mismatch), `SIGMA_REF` (reference
+  edge jitter); `run_statsim.sh --mc N` runs seeds 1..N and tabulates lock
+  time, frequency, period jitter and ref→fb offset (mean ± sd).  nvc runs
+  the 2.6 us sg13g2 loop in 0.1 s (Xyce: 2.1 h): deterministic 639.97 MHz,
+  lock at 1.24 us, 9 ps rms ref→fb; with 1 % stage jitter, 2 % stage
+  mismatch, 5 % pump mismatch and 5 ps reference jitter: 5.6 ps rms period
+  jitter, 45 ps rms ref→fb over 10 seeds.  Logic nets are `resolved_pl`,
+  so stat-sim's metastable flops, taps and CDC traps attach directly (the
+  PFD flops are the natural next target).  Needs a stat-sim checkout
+  (`STATSIM_DIR`, PolyForm-Noncommercial) for `lib/statsim_disc.vhd`.
 - **SPICE netlist emitter** (`kestrel/models/spice.py`) — full transistor-level
   netlist for all PLL blocks with testbench.  Emits a self-biased replica
   bias that tracks Vctrl (same topology as the validated `sim/` decks),
@@ -76,31 +118,50 @@ drive every representation.
   to 517 MHz (0.50 V), the divider chain at 640 and 844 MHz, the PFD
   standalone.  Process-calibrated sizing and the measured limits live in
   `kestrel/process.py` (`vco_calibration`).
-- **Behavioral emitter** (`kestrel/models/behavioral.py`) — template-based
-  behavioral SPICE output.
+- **Behavioral emitter** (`kestrel/models/behavioral.py`) — the generated
+  closed loop for stock ngspice (`kestrel_pll_behavioral.cir`): XSPICE
+  `d_osc` VCO (edges scheduled from a Vctrl→frequency table built from the
+  calibration or the engine's law), `d_dff`/`d_and` PFD, `d_fdiv` divider,
+  B-source pump with rail drop-out, R1–C1/C2 filter tapped at the pump
+  node, reference released after the divider runs.  sg13g2 locks at
+  639.996 MHz / 0.350 V in 0.09 s, sky130 at 999.3 MHz / 0.900 V in 0.13 s.
+  Two ngspice lessons baked in: `d_osc` advances its phase only at analog
+  time points, so its output is bridged to an analog node to make every
+  edge a breakpoint; and XSPICE bridges default to 1 ns delays/ramps.
+  (The behavioral KiCad schematic template still depicts the old B-source
+  multiplier/SDT toy — open item.)
 - **KiCad schematic emitter** (`kestrel/models/schematic.py`) — SVG and
   KiCad S-expression output.
-- **Behavioral VCO model** (`sim/kes_vco.va`) — Van der Pol oscillator in
-  Verilog-A, compiled to OSDI for ngspice. Self-starting, frequency
-  proportional to V(vctrl).
-- **Behavioral PLL testbench** (`sim/kes_run_beh.sp`, plain-netlist twin
-  `sim/kes_tb_beh.sp`) — full PLL loop in ngspice using OSDI models (VCO,
-  charge pump, loop filter) + XSPICE digital (PFD, divider).  Fixed in
-  November 2026: XSPICE `d_dff` set/reset are active-high (the bench drove
-  them as active-low and never released reset), the divider flip-flops had
-  D tied high instead of D ← Q̄, the loop filter tapped the node across C1,
-  and /64 asked for 1.6 GHz, outside the behavioral VCO's range.  Now /32:
-  locks at 800 MHz (25 MHz reference) with the ref→fb phase error bounded
-  to ±1.4 ns; ngspice 45.2 segfaults at `quit` after writing the results.
+- **Behavioral PLL testbench** (`sim/kes_tb_beh.sp`) — the PLL loop in
+  ngspice: XSPICE `d_osc` VCO
+  (event-driven; the Van der Pol Verilog-A VCO `kes_vco.va` is retired —
+  it integrated a frequency), OSDI charge pump and loop filter
+  (`kes_cp.va`, `kes_lf.va`), XSPICE PFD and toggle-chain divider.  Fixed
+  in November 2026: XSPICE `d_dff` set/reset are active-high (the bench
+  drove them as active-low and never released reset), the divider
+  flip-flops had D tied high instead of D ← Q̄, the loop filter tapped the
+  node across C1, the hand-picked filter (R1 = 20 kΩ) gave a 2 V ripple
+  step once the tap was right, and the plain netlist never loaded its
+  OSDI models (no `pre_osdi`, module names used as model names).  The
+  circbyline launcher `kes_run_beh.sp` is gone: with `pre_osdi` the plain
+  netlist loads its own OSDI models, and ngspice 45.2 segfaulted in the
+  launcher's interactive measurements.  Now the loop values and VCO law
+  are the engine's sky130
+  example (667 MHz–1.33 GHz over 0–1.8 V), /32 at 25 MHz: locks at
+  799.9 MHz with Vctrl = 0.360 V, settled by 0.28 us, 0.6 s of ngspice
+  (11.7 s with the Van der Pol VCO).  ngspice 45.2 still segfaults at
+  `quit` after writing the results.
 - **Transistor-level VCO** (`sim/kes_vco_xyce.cir`) — 4-stage differential
   Maneatis ring oscillator on sky130 BSIM4 models. Runs in Xyce with
   `.STEP` parameter sweep.
 - **VCO optimization framework** (`sim/opt/`) — Nelder-Mead sizing
   optimization with pluggable simulator (Xyce, Spectre) and extraction
-  (Calibre, Magic, Quantus) backends. Refits behavioral model polynomial
-  to match transistor-level data.
-- **VCO range characterization** (`sim/vco_range.sh`) — automated
-  frequency-vs-Vctrl sweep for behavioral model.
+  (Calibre, Magic, Quantus) backends.  `--refit` fits the transistor-level
+  f(Vctrl) polynomial and emits it as the delay law of an event-driven
+  Verilog-AMS VCO (`sim/opt/kes_vco_refit.vams`, same ports as the
+  generated `kestrel_vco`).
+- **VCO range characterization** (`sim/vco_range.sh`) — frequency-vs-Vctrl
+  sweep of the event-driven ngspice VCO table (no OSDI needed).
 - **KiCad VCO schematic** (`sch/kes_vco_delay_cell.kicad_sch`) —
   Maneatis delay cell with NMOS/PMOS symbols, generated programmatically.
 
@@ -140,7 +201,10 @@ Refit behavioral model matches transistor curve within ±3.3%.
 - LVS passing (full hierarchical)
 - SV-RNM behavioral model
 - PSL/SVA assertions
-- Probability waveform jitter model
+- Probability-waveform aggregation of the stat-sim Monte-Carlo: the
+  per-seed edge statistics exist (`run_statsim.sh --mc`); the P(edge, t)
+  waveform of US8478576B1 is not yet built from them, and the PFD flops
+  are not yet stat-sim's metastable cells
 - LC-VCO path (inductor design, see Appendix A)
 - Programmable feedback divider: the emitted chain divides by 2^n, so
   closed-loop runs need a spec whose nominal N is a power of two
@@ -152,10 +216,13 @@ Refit behavioral model matches transistor curve within ±3.3%.
   places the real unity-gain crossover at γ/2π ≈ 0.59 × the requested loop
   bandwidth (phase margin there ≈ 57° for a 60° request).  Stable, but the
   bandwidth and settling numbers in the summary are not the realized ones.
-- The behavioral SPICE template (`pll_behavioral.cir-template`) is a
-  multiplier-PD toy with a voltage-driven RC and an SDT() VCO, not a
-  charge-pump loop; the OSDI bench `sim/kes_run_beh.sp` is the behavioral
-  reference.
+- The behavioral KiCad schematic template
+  (`pll_behavioral.kicad_sch-template`) still draws the retired B-source
+  multiplier/SDT loop; the `.cir` it accompanied is now the event-driven
+  ngspice bench.
+- The generated Verilog-AMS has not been run on a Verilog-AMS simulator
+  here (vamos's `-ams` flow is not implemented yet); its logic is verified
+  with iverilog and its nvc form with nvc.
 - A faster first divider stage (prescaler): the six-NAND toggle stage is
   verified to 844 MHz on SG13G2 and mis-counts at 1.09 GHz, which is where
   the generated VCO sits with a discharged loop filter.  A cold power-up
@@ -330,17 +397,16 @@ kestrel/
 │           ├── kestrel_plugin.py    # PLL plugin registration
 │           ├── engine.py            # PLLSpec, PLLDesign, design_pll
 │           └── models/
-│               ├── behavioral.py    # Behavioral SPICE emitter
+│               ├── behavioral.py    # Event-driven ngspice bench emitter
 │               ├── spice.py         # Transistor-level SPICE netlist
-│               ├── verilog_ams.py   # Verilog-AMS model emitter
+│               ├── verilog_ams.py   # Verilog-AMS model emitter (event-driven logic)
+│               ├── statsim.py       # nvc/stat-sim form with timing variability
 │               ├── schematic.py     # SVG / KiCad PLL schematics
 │               └── templates/       # SPICE and KiCad templates
 ├── sim/
-│   ├── kes_vco.va               # Van der Pol VCO (Verilog-A / OSDI)
 │   ├── kes_cp.va                # Charge pump (Verilog-A / OSDI)
 │   ├── kes_lf.va                # Loop filter (Verilog-A / OSDI)
-│   ├── kes_run_beh.sp           # Behavioral PLL testbench (ngspice)
-│   ├── kes_tb_beh.sp            # Behavioral PLL netlist
+│   ├── kes_tb_beh.sp            # Behavioral PLL testbench (ngspice, pre_osdi + XSPICE)
 │   ├── kes_vco_xyce.cir         # Transistor VCO testbench (Xyce + sky130)
 │   ├── kes_vco_xyce_sg13g2.cir # Transistor VCO testbench (Xyce + IHP SG13G2)
 │   ├── vco_range.sh             # VCO range sweep script
@@ -350,7 +416,7 @@ kestrel/
 │       ├── backends.py          # Pluggable sim/extraction backends
 │       ├── config.yaml          # Optimization configuration
 │       ├── best_vco.cir         # Best-found netlist
-│       ├── kes_vco_refit.va     # Refit behavioral VCO model
+│       ├── kes_vco_refit.vams   # Refit event-driven Verilog-AMS VCO
 │       └── refit_params.yaml    # Polynomial fit coefficients
 ├── sch/
 │   ├── kes_vco_delay_cell.kicad_sch  # VCO delay cell schematic
@@ -596,17 +662,28 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
 
 ### M2: Behavioral Simulation — DONE
 
-- [x] Van der Pol VCO in Verilog-A (ngspice/OSDI)
+- [x] Event-driven behavioral VCO everywhere (November 2026): the
+      Verilog-AMS ring model schedules the delay to its next edge, the
+      ngspice benches use XSPICE `d_osc`; the Van der Pol Verilog-A VCO is
+      retired
 - [x] Charge pump and loop filter Verilog-A models
-- [x] Full PLL behavioral testbench (circbyline + XSPICE digital)
+- [x] Full PLL behavioral testbench (plain netlist, pre_osdi + XSPICE digital)
 - [x] VCO range characterization script
+- [x] Verilog-AMS model set with event-driven logic and a closed-loop
+      testbench; logic verified with iverilog (sg13g2 640.0 MHz / 0.350 V,
+      sky130 1000.0 MHz / 0.900 V)
+- [x] nvc/stat-sim form with timing variability: 2.6 us of the sg13g2 loop
+      in 0.1 s, lock at 1.24 us, 5.6 ps rms period jitter at 1 % stage
+      jitter over 10 seeds
+- [x] Generated event-driven ngspice bench per design (`kestrel_pll_behavioral.cir`)
 
 ### M3: Transistor-Level VCO — DONE
 
 - [x] Xyce testbench with sky130 BSIM4 binned models
 - [x] Maneatis delay cell + self-biased replica
 - [x] Sizing optimization framework (Nelder-Mead)
-- [x] Behavioral model refit to match transistor curve
+- [x] Behavioral model refit to match transistor curve (emits the
+      event-driven Verilog-AMS VCO with the fitted delay law)
 - [x] KiCad schematic (delay cell)
 - [x] IHP SG13G2: bundled Xyce-native PSP103 models + IHP-interface wrappers
 - [x] IHP SG13G2: generated VCO verified in Xyce (517–844 MHz over Vctrl 0.5–0.2 V)
@@ -672,7 +749,8 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
 - [ ] Complete worked examples
 - [ ] SV-RNM behavioral model
 - [ ] PSL/SVA assertions
-- [ ] Probability waveform jitter analysis
+- [ ] Probability waveform jitter analysis (the stat-sim Monte-Carlo runner
+      gives the per-seed statistics; aggregate them into P(edge, t))
 - [ ] pyproject.toml packaging
 
 ## Relationship to Cameron EDA Platform

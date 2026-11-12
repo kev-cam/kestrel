@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for behavioral SPICE and KiCad schematic emitters."""
+"""Tests for the behavioral (event-driven ngspice) testbench and KiCad schematic emitters."""
 
 import os, re, sys, tempfile, shutil
 
@@ -70,11 +70,17 @@ def test_spice_directives():
     params = _design_to_params(design)
     text = _fill_template('pll_behavioral.cir-template', params)
     check('cir: has .TRAN', '.TRAN' in text)
-    check('cir: has .PRINT', '.PRINT' in text)
     check('cir: has .END', '.END' in text)
-    check('cir: has Bvco', 'Bvco' in text)
-    check('cir: has Bdiv', 'Bdiv' in text)
-    check('cir: has Bpd', 'Bpd' in text)
+    check('cir: VCO is the event-driven d_osc', 'd_osc(' in text and 'Avco vctrl clk_d vco_mod' in text)
+    check('cir: no frequency-integrating VCO (SDT/sin) left', 'SDT(' not in text and 'Bvco' not in text)
+    check('cir: PFD is two d_dff cleared through a d_and',
+          'Aup_ff d_hi ref_d' in text and 'Adn_ff d_hi fb_d' in text and 'd_and(' in text)
+    check('cir: divider is d_fdiv with the design N', f'div_factor={design.n_nom} ' in text)
+    check('cir: charge pump is a current source into the pump node', 'Bcp 0 vctrl I =' in text)
+    check('cir: control voltage is the pump node (R1 to mid, C2 at vctrl)',
+          'R1 vctrl mid' in text and 'C2 vctrl 0' in text)
+    check('cir: VCO output bridged for a breakpoint per edge', 'Aclk_dac [clk_d] [clk_out] dac_brg' in text)
+    check('cir: reference released late', re.search(r'^Vref ref_clk 0 PULSE\(0 [0-9.]+ 0 ', text, re.M) is None)
 
 
 # -- Test: .kicad_sch has balanced parentheses ----
@@ -104,8 +110,8 @@ def test_emit_behavioral():
         check('emit_behavioral: returns 1 file', len(files) == 1)
         check('emit_behavioral: file exists', os.path.exists(files[0]))
         text = open(files[0]).read()
-        check('emit_behavioral: contains design kvco',
-              str(design.n_nom) in text)
+        check('emit_behavioral: contains the design N and the d_osc VCO',
+              f'div_factor={design.n_nom} ' in text and 'd_osc(' in text)
     finally:
         shutil.rmtree(tmpdir)
 

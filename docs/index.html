@@ -151,9 +151,10 @@ with replica-biased symmetric load delay cells.</p>
 <h3>What Kestrel produces today</h3>
 <table>
 <tr><th>Output</th><th>Tool</th><th>Status</th></tr>
-<tr><td>Verilog-AMS behavioral model</td><td>&mdash;</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>Verilog-AMS behavioral model (event-driven logic, delay-to-next-edge VCO) + testbench</td><td>logic checked with iverilog</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>nvc / stat-sim model with timing variability</td><td>nvc + stat-sim</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>SPICE transistor-level netlist</td><td>Xyce, ngspice</td><td><span class="tag done">Done</span></td></tr>
-<tr><td>Behavioral PLL testbench</td><td>ngspice + OSDI</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>Behavioral PLL testbench (event-driven XSPICE)</td><td>ngspice (+ OSDI in sim/)</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>Transistor-level VCO testbench</td><td>Xyce + sky130</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>KiCad schematic</td><td>KiCad 10</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>VCO sizing optimization</td><td>SciPy + Xyce</td><td><span class="tag done">Done</span></td></tr>
@@ -177,17 +178,19 @@ kestrel gen \
 kestrel gui --process sky130
 </pre>
 
-<h3>Run the behavioral PLL simulation</h3>
+<h3>Run the behavioral PLL simulations</h3>
 <pre>
+# Generated event-driven bench on stock ngspice (0.1 s)
+cd kestrel_out &amp;&amp; ngspice -b kestrel_pll_behavioral.cir
+
+# Generated nvc/stat-sim form, 20-seed Monte-Carlo with timing variability
+SIGMA_J=0.01 SIGMA_MM=0.02 bash run_statsim.sh --mc 20
+
+# Hand-written sim/ bench with the OSDI pump and filter (one-time compile)
 cd sim
-
-# Compile Verilog-A models to OSDI (one-time)
-openvaf kes_vco.va --output kes_vco.osdi
-openvaf kes_cp.va  --output kes_cp.osdi
-openvaf kes_lf.va  --output kes_lf.osdi
-
-# Run behavioral PLL
-ngspice kes_run_beh.sp
+openvaf kes_cp.va --output kes_cp.osdi
+openvaf kes_lf.va --output kes_lf.osdi
+ngspice -b kes_tb_beh.sp
 </pre>
 
 <h3>Run the transistor-level VCO</h3>
@@ -254,15 +257,21 @@ analytically from the user specification:</p>
 
 <div class="grid">
 <div class="card">
-<h3>Behavioral (ngspice)</h3>
-<p>Uses OSDI-compiled Verilog-A models for VCO, charge pump, and loop filter.
-PFD and divider use XSPICE digital primitives (d_dff, d_and, adc/dac_bridge).</p>
-<p>The VCO is a Van der Pol oscillator with <code>f = kvco * V(vctrl)</code>.
-Self-starting via asymmetric bias term. Compiled from
-<code>kes_vco.va</code> with OpenVAF.</p>
+<h3>Behavioral (event-driven)</h3>
+<p>The models of record are the generated Verilog-AMS set: the VCO is one
+process, the edge travelling round the ring, that reads V(vctrl) on entering
+each stage and waits that stage's delay; PFD and divider are event-driven
+logic; only the charge pump and loop filter are analog blocks.  No frequency
+is ever integrated.  The nvc/stat-sim form replaces the analog pump and filter
+by their exact closed form between pump events and adds timing variability
+(stage mismatch, per-edge jitter, pump mismatch, reference jitter).</p>
+<p>On stock ngspice the same loop uses the XSPICE <code>d_osc</code> VCO
+(edges scheduled from a Vctrl&rarr;frequency table), <code>d_dff</code>/<code>d_and</code>
+PFD and <code>d_fdiv</code> divider; the <code>sim/</code> bench keeps the OSDI
+pump and filter (<code>kes_cp.va</code>, <code>kes_lf.va</code>).</p>
 <p><strong>Files:</strong><br>
-<code>sim/kes_run_beh.sp</code> (launcher)<br>
-<code>sim/kes_vco.va</code>, <code>kes_cp.va</code>, <code>kes_lf.va</code></p>
+<code>kestrel_*.vams</code>, <code>kestrel_pll_statsim.vhd</code>, <code>kestrel_pll_behavioral.cir</code> (generated)<br>
+<code>sim/kes_tb_beh.sp</code>, <code>kes_cp.va</code>, <code>kes_lf.va</code></p>
 </div>
 <div class="card">
 <h3>Transistor-level (Xyce)</h3>
@@ -326,8 +335,9 @@ Uses <code>.STEP</code> parameter sweep over Vctrl with
 <h3>Refit</h3>
 <p>After optimization, <code>--refit</code> fits a polynomial
 <code>f(Vctrl) = a<sub>3</sub>V<sup>3</sup> + a<sub>2</sub>V<sup>2</sup> + a<sub>1</sub>V + a<sub>0</sub></code>
-to the transistor-level data and generates an updated Verilog-A behavioral model
-(<code>opt/kes_vco_refit.va</code>) that matches the layout exactly.</p>
+to the transistor-level data and emits it as the delay law of an event-driven
+Verilog-AMS VCO (<code>opt/kes_vco_refit.vams</code>, same ports as the generated
+<code>kestrel_vco</code>).</p>
 
 <!-- ================================================================ -->
 <h2 id="results">Results</h2>

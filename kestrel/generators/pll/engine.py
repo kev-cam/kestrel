@@ -280,16 +280,20 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
     # shrinks it.
     d.ripple_step = d.icp * d.r_filter
     if cal and cal.get("vctrl_min") is not None and cal.get("vctrl_max") is not None:
-        v_range = cal["vctrl_max"] - cal["vctrl_min"]
-        if v_range > 0 and d.ripple_step > 0.5 * v_range:
-            d.warnings.append(
-                f"{spec.process}: one full-width charge-pump pulse steps the "
-                f"control node by Icp*R1 = {d.ripple_step * 1e3:.0f} mV, more "
-                f"than half the calibrated {cal['vctrl_min']:.2f}-"
-                f"{cal['vctrl_max']:.2f} V tuning range; during acquisition a "
-                f"cycle slip can throw the VCO past the divider's range "
-                f"(lower the loop bandwidth, or use a divider rated for the "
-                f"VCO's top speed)")
+        v_lo, v_hi = cal["vctrl_min"], cal["vctrl_max"]
+        range_note = f"the calibrated {v_lo:.2f}-{v_hi:.2f} V tuning range"
+    else:
+        v_lo, v_hi = 0.2 * spec.supply_voltage, 0.8 * spec.supply_voltage
+        range_note = f"the assumed {v_lo:.2f}-{v_hi:.2f} V tuning range"
+    v_range = v_hi - v_lo
+    if v_range > 0 and d.ripple_step > 0.5 * v_range:
+        d.warnings.append(
+            f"{spec.process}: one full-width charge-pump pulse steps the "
+            f"control node by Icp*R1 = {d.ripple_step * 1e3:.0f} mV, more "
+            f"than half {range_note}; during acquisition a "
+            f"cycle slip can throw the VCO past the divider's range "
+            f"(lower the loop bandwidth or raise Icp to shrink R1, or use a "
+            f"divider rated for the VCO's top speed)")
 
     # --- Jitter estimate (linear noise model) ---
     # Simplified: jitter_rms ~ 1/(2*pi*f_center) * sqrt(kT / (C1 * Vswing^2))

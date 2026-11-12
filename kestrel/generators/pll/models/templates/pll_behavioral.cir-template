@@ -1,21 +1,93 @@
-* Kestrel PLL Generator — Behavioral SPICE Model
+* Kestrel PLL Generator — behavioral closed-loop testbench (ngspice, event-driven)
 *
-* Target: @FREQ_MIN@ - @FREQ_MAX@
-* Ref:    @REF_FREQ@ (@REF_AMPLITUDE@V)
-* VCO:    @F_CENTER@ center, @KVCO@ Hz/V gain
-* Filter: R=@R_FILTER@, C1=@C1@, C2=@C2@
-* Divider: N=@N_NOM@
+* Target: @FREQ_MIN@ - @FREQ_MAX@   Ref: @REF_FREQ@   Process: @PROCESS@
+* VCO:    @F_CENTER@ at Vctrl = @VCTRL_NOM@ V, Kvco = @KVCO_SIGNED@ Hz/V
+* Pump:   Icp = @ICP@   Filter: R1 = @R_FILTER@, C1 = @C1@, C2 = @C2@   N = @N_NOM@
 *
-* Topology: Phase-detector → Loop-filter → VCO → Divider → feedback
-* B-source behavioral model suitable for system-level verification.
+* The behavioral models of record are the generated Verilog-AMS set
+* (kestrel_*.vams, event-driven logic) and their nvc/stat-sim form
+* (kestrel_pll_statsim.vhd).  This deck is the same loop on stock ngspice:
+*   VCO      XSPICE d_osc: every output edge is scheduled from the control
+*            voltage through a Vctrl -> frequency table (@VCO_TABLE_NOTE@)
+*   PFD      two d_dff set by the clock edges, cleared through a d_and
+*   divider  d_fdiv, /@N_NOM@
+*   pump     B-source, +Icp into the filter node while UP, -Icp while DN
+*            (@CP_NOTE@)
+*   filter   R1 + C1 in series, C2 shunt; the control voltage is the pump
+*            node, so the VCO sees the R1-C1 zero
+* d_osc advances its phase only at analog time points, so the VCO output is
+* bridged to the analog node clk_out: every edge is then a solver breakpoint
+* and the output frequency follows the table instead of the step size.
+* The reference is released at @REF_DELAY@, after the divider's first edges
+* (a reference edge arriving first latches UP; see kestrel_tb.sp).
 *
-Vref in 0 SIN(0 @REF_AMPLITUDE@ @REF_FREQ@)
-Bpd pd 0 V = {V(in) * V(fb)}
-R1 pd lpf @R_FILTER@
-C1 lpf 0 @C1@
-C2 pd 0 @C2@
-Bvco vco 0 V = {SIN(6.283185 * (@F_CENTER@*TIME + @KVCO@*SDT(V(lpf))))}
-Bdiv fb 0 V = {SIN(6.283185 * (@F_CENTER@/@N_NOM@*TIME + @KVCO@/@N_NOM@*SDT(V(lpf))))}
+* Run:  ngspice -b kestrel_pll_behavioral.cir
+*   expected acquisition ~@ACQ_TIME@ from Vctrl = @VCTRL_START@ V, run @TRAN_STOP@
+*
+Vdd vdd 0 @VDD@
+
+* Reference clock
+Vref ref_clk 0 PULSE(0 @VDD@ @REF_DELAY@ 100p 100p @REF_HALF@ @REF_PERIOD@)
+Aref_adc [ref_clk] [ref_d] adc_brg
+.MODEL adc_brg adc_bridge(in_low=@VLO@ in_high=@VHI@ rise_delay=20p fall_delay=20p)
+
+* PFD: UP flop clocked by the reference, DN flop by the feedback, D tied
+* high, both cleared through the AND of their outputs (active-high resets)
+Ad_hi d_hi pull_hi
+.MODEL pull_hi d_pullup(load=1p)
+As_lo s_lo pull_lo
+.MODEL pull_lo d_pulldown(load=1p)
+Aup_ff d_hi ref_d s_lo rst_d up_d up_db dff_mod
+Adn_ff d_hi fb_d  s_lo rst_d dn_d dn_db dff_mod
+.MODEL dff_mod d_dff(clk_delay=50p set_delay=50p reset_delay=50p ic=0
++ rise_delay=50p fall_delay=50p)
+Arst_and [up_d dn_d] rst_d and_mod
+.MODEL and_mod d_and(rise_delay=150p fall_delay=150p)
+Aup_dac [up_d] [up] dac_brg
+Adn_dac [dn_d] [dn] dac_brg
+.MODEL dac_brg dac_bridge(out_low=0 out_high=@VDD@ out_undef=0 t_rise=50p t_fall=50p)
+
+* Charge pump and loop filter.  The current sources drop out at the rails
+* (u(Vdd - V) on sourcing, u(V) on sinking), as the transistor pump does.
+Bcp 0 vctrl I = @CP_SIGN@ * @ICP@ * (u(V(up) - @VMID@) - u(V(dn) - @VMID@))
++ * ((@CP_SIGN@ * (u(V(up) - @VMID@) - u(V(dn) - @VMID@)) > 0) ? u(@VDD@ - V(vctrl)) : u(V(vctrl)))
+R1 vctrl mid @R_FILTER@
+C1 mid 0 @C1@
+C2 vctrl 0 @C2@
+.IC V(vctrl)=@VCTRL_START@ V(mid)=@VCTRL_START@
+
+* VCO (event-driven) and its analog breakpoint bridge
+Avco vctrl clk_d vco_mod
+.MODEL vco_mod d_osc(cntl_array=[@VCO_CNTL@]
++ freq_array=[@VCO_FREQ@]
++ duty_cycle=0.5 init_phase=0 rise_delay=20p fall_delay=20p)
+Aclk_dac [clk_d] [clk_out] dac_brg
+
+* Divider /N
+Adiv clk_d fb_d div_mod
+.MODEL div_mod d_fdiv(div_factor=@N_NOM@ high_cycles=@N_HALF@ i_count=0
++ rise_delay=50p fall_delay=50p)
+Afb_dac [fb_d] [fb_clk] dac_brg
+
 .TRAN @TRAN_STEP@ @TRAN_STOP@
-.PRINT TRAN V(in) V(vco) V(lpf) V(fb)
+
+.control
+run
+meas tran vctrl_final FIND V(vctrl) AT=@T_END@
+* VCO frequency: 100 periods of clk_out in the last quarter of the run
+meas tran t1 WHEN V(clk_out)=@VMID@ RISE=1 TD=@T_MEAS@
+meas tran t2 WHEN V(clk_out)=@VMID@ RISE=101 TD=@T_MEAS@
+let f_vco_mhz = 100e-6/(t2 - t1)
+* ref->fb offset of the last pair of edges (positive: feedback late; a value
+* near -@REF_PERIOD@ means the run ended between a reference edge and its
+* feedback edge)
+meas tran t_ref WHEN V(ref_clk)=@VMID@ RISE=LAST
+meas tran t_fb  WHEN V(fb_clk)=@VMID@ RISE=LAST
+let pe_ns = (t_fb - t_ref)*1e9
+echo
+echo "=== Kestrel behavioral PLL (ngspice, event-driven) ==="
+echo "target @F_TARGET@"
+print vctrl_final f_vco_mhz pe_ns
+wrdata kestrel_pll_behavioral.csv V(vctrl) V(ref_clk) V(fb_clk)
+.endc
 .END

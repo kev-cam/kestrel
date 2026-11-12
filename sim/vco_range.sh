@@ -1,44 +1,37 @@
 #!/bin/bash
-# VCO range characterization — behavioral (ngspice/OSDI)
-# Run from the sim/ directory: cd sim && bash vco_range.sh
-#
-# Prerequisites: compile .va → .osdi with OpenVAF:
-#   openvaf kes_vco.va --output kes_vco.osdi
+# VCO range check — the event-driven behavioral VCO of the ngspice benches
+# (XSPICE d_osc: every output edge scheduled from the control voltage through
+# the Vctrl -> frequency table).  Prints frequency against control voltage for
+# the table kes_tb_beh.sp uses (the engine's sky130 law:
+# 667 MHz at 0 V, 1 GHz at 0.9 V, 1.33 GHz at 1.8 V).  No OSDI needed.
+# Run: bash sim/vco_range.sh
 
 SIMDIR="$(cd "$(dirname "$0")" && pwd)"
+TABLE="cntl_array=[0 0.9 1.8] freq_array=[6.66667e+08 1e+09 1.33333e+09]"
 
-echo "=== VCO Range (Behavioral ngspice/OSDI) ==="
+echo "=== VCO range (ngspice d_osc, event-driven) ==="
 echo "Vctrl(V)  Freq(MHz)"
 
-for vctrl in 0.1 0.2 0.3 0.5 0.7 0.9 1.0 1.1 1.3 1.5; do
-  # Longer sim for low Vctrl (slow oscillation + startup time)
-  if [ "$(echo "$vctrl < 0.3" | bc)" = "1" ]; then
-    tstop=200n
-  else
-    tstop=40n
-  fi
-
+for vctrl in 0.0 0.2 0.4 0.6 0.9 1.2 1.5 1.8; do
   cat > "$SIMDIR/_vco_tmp.sp" << SPEOF
 * VCO at Vctrl=$vctrl
+Vctrl vc 0 $vctrl
+Avco vc clk_d vmod
+.MODEL vmod d_osc($TABLE duty_cycle=0.5 init_phase=0 rise_delay=20p fall_delay=20p)
+* the bridge gives the solver a breakpoint per edge and a waveform to measure
+Aclk [clk_d] [clk] dac_brg
+.MODEL dac_brg dac_bridge(out_low=0 out_high=1.8 t_rise=20p t_fall=20p)
+.tran 0.1n 300n
 .control
-osdi $SIMDIR/kes_vco.osdi
-circbyline * VCO test Vctrl=$vctrl
-circbyline Vctrl vc 0 $vctrl
-circbyline .MODEL vmod kes_vco(kvco=1e9 vdd=1.8)
-circbyline Nvco1 vc outp outn vmod
-circbyline R1 outp 0 100k
-circbyline R2 outn 0 100k
-circbyline .tran 10p $tstop UIC
-circbyline .end
 run
-meas tran t1 WHEN V(outp)=0.9 RISE=5
-meas tran t2 WHEN V(outp)=0.9 RISE=6
-let fmhz = 1e-6/(t2 - t1)
+meas tran t1 WHEN V(clk)=0.9 RISE=11
+meas tran t2 WHEN V(clk)=0.9 RISE=111
+let fmhz = 100e-6/(t2 - t1)
 print fmhz
-quit
 .endc
+.end
 SPEOF
-  freq=$(timeout 120 ngspice "$SIMDIR/_vco_tmp.sp" </dev/null 2>&1 | grep "fmhz" | tail -1 | awk '{print $3}')
+  freq=$(timeout 120 ngspice -b "$SIMDIR/_vco_tmp.sp" </dev/null 2>&1 | grep "^fmhz" | tail -1 | awk '{print $3}')
   printf "%-9s %s\n" "$vctrl" "$freq"
 done
 
