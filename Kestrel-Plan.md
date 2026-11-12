@@ -61,13 +61,17 @@ drive every representation.
   flip-flop with asynchronous reset used by the PFD and as the divider's
   toggle stage, an open-loop VCO characterization deck
   (`kestrel_vco_tb.sp`), and swaps the charge-pump UP/DN inputs for VCOs
-  with negative Kvco.
+  with negative Kvco.  The closed-loop testbench starts the loop filter at
+  a defined point (`.IC`, 0 V or the process's calibrated minimum) and runs
+  long enough for the slew-limited acquisition, which the design summary
+  reports next to the linear lock-time estimate.
 - **IHP SG13G2 transistor-level path** (November 2026) — Xyce-native PSP103
   TT cards plus wrappers with IHP's `sg13_lv_nmos/pmos` subcircuit
   interface, bundled in `sim/models/` and copied next to every generated
   netlist.  `kestrel pll gen --process sg13g2` output parses and runs in
   Xyce unmodified; the generated VCO is verified at 844 MHz (Vctrl 0.20 V)
-  to 517 MHz (0.50 V).  Process-calibrated sizing lives in
+  to 517 MHz (0.50 V), the divider chain at 640 and 844 MHz, the PFD
+  standalone.  Process-calibrated sizing and the measured limits live in
   `kestrel/process.py` (`vco_calibration`).
 - **Behavioral emitter** (`kestrel/models/behavioral.py`) — template-based
   behavioral SPICE output.
@@ -95,7 +99,7 @@ drive every representation.
 
 | Metric | Behavioral | Transistor (sky130) | Transistor (SG13G2, generated) |
 |--------|-----------|---------------------|--------------------------------|
-| VCO range | 71–1056 MHz | 477–789 MHz | 517–844 MHz |
+| VCO range | 71–1056 MHz | 477–789 MHz | 517–844 MHz (monotonic part; 1.09 GHz at 0 V) |
 | Kvco | ~707 MHz/V (linear) | ~298 MHz/V (saturating) | ~−1.09 GHz/V (monotonic, Maneatis polarity) |
 | Valid Vctrl | 0.1–1.5 V | 0.7–1.5 V | 0.2–0.5 V |
 | Simulator | ngspice + OSDI | Xyce | Xyce (PSP103) |
@@ -133,6 +137,11 @@ Refit behavioral model matches transistor curve within ±3.3%.
   closed-loop runs need a spec whose nominal N is a power of two
 - sky130 generated netlists still need the PDK's subcircuit model mapping
   (the bundled `sim/models` sky130 cards are binned `__model.N` names)
+- A faster first divider stage (prescaler): the six-NAND toggle stage is
+  verified to 844 MHz on SG13G2 and mis-counts at 1.09 GHz, which is where
+  the generated VCO sits with a discharged loop filter.  A cold power-up
+  from 0 V is therefore not covered; the testbench starts at the
+  calibrated 0.2 V and the design summary warns about it.
 
 ## Architecture
 
@@ -220,11 +229,27 @@ Schematic netlist (from design engine)
   (tail 4u/0.5u, pair 2u/0.34u, loads 3u/0.5u) measured on the generated
   VCO: 844 MHz at Vctrl 0.20 V falling to 517 MHz at 0.50 V, Kvco ≈ −1.09
   GHz/V — Maneatis polarity, so the emitter swaps the charge-pump UP/DN
-  inputs.  Above ~0.55 V the curve turns back up; stay within 0.2–0.5 V.
+  inputs.  Full curve of the generated VCO (Xyce, 0.1 V steps): 1093 MHz at
+  0 V, 968 at 0.1, 844 at 0.2, 723 at 0.3, 609 at 0.4, 517 at 0.5, a
+  minimum of 511 MHz at 0.6 V, then back up to a 625 MHz floor from 0.9 V
+  (Vctrl PFET off; Istart and the replica diode set the ring current).
+  Stay within 0.2–0.5 V.  The emitted 2^n divider counts cleanly at 640
+  and 844 MHz and mis-counts at 1093 MHz, so the closed-loop testbench
+  starts the loop filter at 0.2 V (`.IC V(Xpll:vctrl)=0.2`) instead of a
+  discharged 0 V, and `kestrel pll gen` warns about it.  Acquisition is
+  slew-limited: the charge pump moves the filter at about Icp/2/(C1+C2)
+  while the PFD cycle-slips (0.34 V/us for the 2 MHz-bandwidth example),
+  so the summary's linear lock time (230 ns) understates the time to lock
+  (estimate 0.67 us from 0.2 V; an undefined start left the loop parked at
+  1.2 V on the 625 MHz floor and still unlocked after 2 us).  Closed loop
+  from 0.2 V (Xyce, 2 us): overshoot to 0.50 V at 0.85 us, within 3 % of
+  640 MHz by 1.3 us, 659 MHz at Vctrl 0.355 V at 2 us with the phase error
+  crossing zero — frequency acquired, final settling under way.
   Decks: `sim/kes_vco_xyce_sg13g2.cir` (hand sizing, no junction areas,
-  17-point sweep ≈ 16 min) and the generated `kestrel_vco_tb.sp`.  Note:
-  on a Xyce that supplies PSP103 through the Verilog-A `.HDL` path (PyMS)
-  every run pays a ~2 min model compile before the transient starts.
+  17-point sweep ≈ 16 min) and the generated `kestrel_vco_tb.sp` (7 points
+  ≈ 5 min; a 2 us closed-loop `kestrel_tb.sp` run ≈ 80 min).  Note: on a
+  Xyce that supplies PSP103 through the Verilog-A `.HDL` path (PyMS) every
+  run pays a ~2 min model compile before the transient starts.
 
 ### Commercial PDKs (Roadmap)
 
@@ -533,6 +558,13 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
 - [x] KiCad schematic (delay cell)
 - [x] IHP SG13G2: bundled Xyce-native PSP103 models + IHP-interface wrappers
 - [x] IHP SG13G2: generated VCO verified in Xyce (517–844 MHz over Vctrl 0.5–0.2 V)
+- [x] IHP SG13G2: generated divider (/32 at 640 and 844 MHz) and PFD verified standalone in Xyce
+- [x] IHP SG13G2: closed-loop acquisition of the generated PLL in Xyce (/32,
+      20 MHz ref → 640 MHz, 2 us): from Vctrl 0.2 V the loop overshoots to
+      0.50 V at 0.85 us, is back within 3 % of 640 MHz by 1.3 us and at 2 us
+      sits at 659 MHz with Vctrl flat at 0.355 V and the ref→fb phase error
+      passing through zero (final overdamped settling, ζ = 1.8)
+- [ ] IHP SG13G2: settled lock in the emitted 2.5 us transient (run in progress)
 
 ### M4: Layout and Extraction — IN PROGRESS
 

@@ -37,6 +37,8 @@ class PLLDesign:
     kvco: float = 0.0        # Hz/V — VCO gain
     f_center: float = 0.0    # Hz — VCO center frequency
     vctrl_nom: float = 0.0   # V — nominal control voltage
+    vctrl_start: float = 0.0  # V — loop-filter start point (testbench .IC,
+                              #   acquisition estimate); 0 = discharged
 
     # Charge pump
     icp: float = 0.0         # A — charge pump current
@@ -49,7 +51,9 @@ class PLLDesign:
     # Derived performance
     natural_freq: float = 0.0    # rad/s
     damping: float = 0.0
-    lock_time: float = 0.0       # seconds (estimated)
+    lock_time: float = 0.0       # seconds — linear settling (estimated)
+    acq_time: float = 0.0        # seconds — slew-limited acquisition from a
+                                 #   discharged loop filter (estimated)
     pm_actual: float = 0.0       # degrees — actual phase margin
     jitter_est: float = 0.0      # seconds rms — estimated jitter
 
@@ -133,6 +137,21 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
             d.kvco_sign = -1 if cal["kvco"] < 0 else 1
         if cal.get("vctrl_nom") is not None:
             d.vctrl_nom = cal["vctrl_nom"]
+        if cal.get("vctrl_min") is not None:
+            # Start the closed-loop testbench at the calibrated minimum
+            # rather than at 0 V: a discharged loop filter puts a
+            # negative-Kvco VCO at its top speed, which can be more than
+            # the divider chain follows.
+            d.vctrl_start = cal["vctrl_min"]
+        if cal.get("f_vctrl0") and cal.get("div_fmax") and \
+                cal["f_vctrl0"] > cal["div_fmax"]:
+            d.warnings.append(
+                f"{spec.process}: the VCO reaches "
+                f"{format_eng(cal['f_vctrl0'], 'Hz')} at Vctrl = 0 V but the "
+                f"divider chain is verified only to "
+                f"{format_eng(cal['div_fmax'], 'Hz')}; the testbench starts "
+                f"the loop filter at {d.vctrl_start:.2f} V, and a power-up "
+                f"from a discharged filter may stall")
         if cal.get("f_min") and cal.get("f_max") and \
                 not (cal["f_min"] <= d.f_center <= cal["f_max"]):
             d.warnings.append(
@@ -229,6 +248,20 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
     # --- Lock time estimate (5 * time constant) ---
     if d.natural_freq > 0 and d.damping > 0:
         d.lock_time = 5.0 / (d.damping * d.natural_freq)
+
+    # --- Acquisition time estimate (large signal) ---
+    # Before the linear loop takes over, the charge pump has to slew the
+    # loop filter from its start point (vctrl_start: 0 V for a discharged
+    # filter at power-up, or the calibrated minimum; kestrel_tb.sp starts
+    # it there with .IC) to the lock voltage.  While the PFD is
+    # cycle-slipping the average pump current is ~Icp/2, so
+    # t_slew ~ (C1 + C2) * |Vctrl_nom - Vctrl_start| / (Icp / 2); the
+    # linear settling is added on top.  This, not lock_time, sets how
+    # long a transistor-level transient has to run to show lock (a
+    # 2 MHz-bandwidth SG13G2 design: lock_time ~230 ns, acq_time ~0.7 us).
+    if d.icp > 0:
+        d.acq_time = c_total * abs(d.vctrl_nom - d.vctrl_start) / (d.icp / 2.0) \
+            + d.lock_time
 
     # --- Jitter estimate (linear noise model) ---
     # Simplified: jitter_rms ~ 1/(2*pi*f_center) * sqrt(kT / (C1 * Vswing^2))
@@ -396,6 +429,7 @@ def summarize(d: PLLDesign) -> str:
         f"  Phase margin:    {d.pm_actual:.1f} deg",
         f"  Damping ratio:   {d.damping:.2f}",
         f"  Lock time (est): {format_eng(d.lock_time, 's')}",
+        f"  Acq. time (est): {format_eng(d.acq_time, 's')} (slew from Vctrl = {d.vctrl_start:.2g} V)",
         f"  Jitter (est):    {format_eng(d.jitter_est, 's')} rms",
     ]
     if d.warnings:

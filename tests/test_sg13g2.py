@@ -67,6 +67,18 @@ def test_emitted_files():
         b = tb.find('.INCLUDE "models/sg13g2_lv.lib"')
         check('testbench includes model files, cards before wrappers', 0 <= a < b)
         check('testbench supply is 1.2 V', re.search(r'^Vdd vdd 0 1\.2\s*$', tb, re.M) is not None)
+        check('testbench starts the loop filter at the calibrated minimum (0.2 V)',
+              re.search(r'^\.IC V\(Xpll:vctrl\)=0\.2\s*$', tb, re.M) is not None)
+        check('design warns that a 0 V start outruns the divider',
+              any('divider chain is verified only to 844 MHz' in w for w in design.warnings),
+              '; '.join(design.warnings))
+        check('acquisition estimate exceeds the linear lock time',
+              design.acq_time > design.lock_time > 0,
+              f'acq {design.acq_time:.3g} s, lock {design.lock_time:.3g} s')
+        m = re.search(r'^\.TRAN \S+ ([0-9.]+)([pnum]?)\s*$', tb, re.M)
+        tstop = float(m.group(1)) * {'p': 1e-12, 'n': 1e-9, 'u': 1e-6, 'm': 1e-3, '': 1.0}[m.group(2)] if m else 0
+        check('testbench transient covers the acquisition estimate',
+              tstop >= design.acq_time, f'.TRAN stop {tstop:.3g} s vs acq {design.acq_time:.3g} s')
         vco = open(os.path.join(out, 'kestrel_vco.sp')).read()
         devs = re.findall(r'^([MX])\S+ \S+ \S+ \S+ \S+ (\S+) W=', vco, re.M)
         check('VCO devices are X-instances of sg13_lv_* wrappers',
@@ -109,6 +121,8 @@ def test_sky130_unaffected():
         check('sky130 emits no bundled models', not any(n.startswith('models/') for n in names))
         tb = open(os.path.join(out, 'kestrel_tb.sp')).read()
         check('sky130 testbench keeps the PDK placeholder', '<path_to_pdk>' in tb)
+        check('sky130 testbench starts the loop filter discharged',
+              re.search(r'^\.IC V\(Xpll:vctrl\)=0\s*$', tb, re.M) is not None)
         top = open(os.path.join(out, 'kestrel_pll_top.sp')).read()
         check('sky130 charge pump keeps UP/DN order',
               re.search(r'^Xcp cp_out up dn pbias nbias', top, re.M) is not None)

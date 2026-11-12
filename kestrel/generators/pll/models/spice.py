@@ -458,10 +458,9 @@ Rinv_up up_node up 1
 * DN switch — NMOS pass gate (active-high DN)
 {m("n_sw", "out", "dn", "dn_drain", "vss", nfet, sw_half_w, sw_l, pfx)}
 
-* Mirror references: pull Icp OUT of the PMOS diode (pbias) and push it
-* INTO the NMOS diode (nbias).  (Reversed polarity leaves both mirrors at
-* zero current and the loop filter frozen.)
-* Bias current reference
+* Bias current references: pull Icp OUT of the PMOS diode (pbias) and
+* push it INTO the NMOS diode (nbias).  (Reversed polarity leaves both
+* mirrors at zero current and the loop filter frozen.)
 Ibias_p pbias vss {_eng(d.icp)}
 Ibias_n vdd nbias {_eng(d.icp)}
 
@@ -652,8 +651,16 @@ def _write_testbench(d: PLLDesign, out: str) -> str:
     proc = get_process_params(d.spec.process)
     vdd = d.spec.supply_voltage
     ref_period = 1.0 / d.spec.ref_freq
-    # Simulate for enough cycles to see lock
-    sim_time = max(d.lock_time * 3, 50 * ref_period) if d.lock_time > 0 else 100 * ref_period
+    # Long enough to see lock: the slew-limited acquisition from a
+    # discharged loop filter (d.acq_time) dominates, not the linear
+    # lock_time.
+    sim_time = max(d.acq_time * 1.5, d.lock_time * 3, 50 * ref_period) \
+        if d.lock_time > 0 else 100 * ref_period
+    if d.vctrl_start > 0:
+        start_note = (f"{d.vctrl_start:.3g} V, the bottom of the calibrated Vctrl range\n"
+                      f"* (from 0 V this VCO runs faster than the divider chain can follow).")
+    else:
+        start_note = "discharged, 0 V (power-up)."
     tstep = ref_period / 20
 
     with open(path, "w") as f:
@@ -661,7 +668,9 @@ def _write_testbench(d: PLLDesign, out: str) -> str:
 * Kestrel PLL Testbench
 *
 * Process: {d.spec.process}
-* Expected lock time: ~{format_eng(d.lock_time, 's')}
+* Linear settling time:  ~{format_eng(d.lock_time, 's')}
+* Expected acquisition:  ~{format_eng(d.acq_time, 's')} (charge pump slewing the loop
+*   filter from {d.vctrl_start:.2g} V to Vctrl ~ {d.vctrl_nom:.2f} V at ~Icp/2, plus settling)
 *
 
 {_model_section(proc)}
@@ -693,6 +702,13 @@ Xpll clk_out clk_outb vctrl_mon ref_clk vdd vss kestrel_pll_top
 
 * Startup kick — breaks the ring's symmetric (non-oscillating) DC point
 Ikick 0 Xpll:Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
+
+* Loop filter start point: {start_note}
+* Without a defined start the operating point parks Vctrl wherever the
+* idle charge pump's leakage leaves it — an arbitrary point that can put
+* the VCO outside its tuning range and stretch acquisition well past the
+* transient.
+.IC V(Xpll:vctrl)={d.vctrl_start:.3g}
 
 **********************************************************************
 * Simulation

@@ -71,6 +71,15 @@ _PROCESS_PARAMS = {
             "vctrl_nom": 0.35,        # V, middle of the usable range
             "vctrl_min": 0.20, "vctrl_max": 0.50,
             "f_min": 517e6, "f_max": 844e6,
+            # Outside the monotonic range (generated VCO, Xyce): 1.09 GHz
+            # at Vctrl = 0 V, minimum 511 MHz at 0.6 V, then a 625 MHz
+            # floor above 0.9 V where the Vctrl PFET is off and Istart plus
+            # the diode set the ring current.
+            "f_vctrl0": 1.093e9,
+            # Highest input frequency at which the emitted 2^n divider
+            # chain was verified to count correctly (it mis-counts at
+            # 1.09 GHz, so a loop started from a discharged filter stalls).
+            "div_fmax": 844e6,
         },
     },
 }
