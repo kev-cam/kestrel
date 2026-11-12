@@ -28,24 +28,22 @@ Afb_adc  [fb_clk]  [fb_d]  adc_brg
 Ad_hi d_hi pull_hi
 .MODEL pull_hi d_pullup(load=1p)
 
-* Tie set_bar high (inactive)
-As_hi set_hi pull_hi
+* XSPICE d_dff set/reset are ACTIVE-HIGH: hold set low (inactive)
+As_lo set_hi pull_lo
+.MODEL pull_lo d_pulldown(load=1p)
 
-* UP DFF: D=1, CLK=ref_clk, SET=hi, RST=rst_n
-Aup_ff d_hi ref_d set_hi rst_n up_d up_db dff_mod
+* UP DFF: D=1, CLK=ref_clk, SET=low, RST=rst_d (active-high)
+Aup_ff d_hi ref_d set_hi rst_d up_d up_db dff_mod
 
-* DN DFF: D=1, CLK=fb_clk, SET=hi, RST=rst_n
-Adn_ff d_hi fb_d set_hi rst_n dn_d dn_db dff_mod
+* DN DFF: D=1, CLK=fb_clk, SET=low, RST=rst_d (active-high)
+Adn_ff d_hi fb_d set_hi rst_d dn_d dn_db dff_mod
 
 .MODEL dff_mod d_dff(clk_delay=50p set_delay=50p reset_delay=50p
 + ic=0 rise_delay=50p fall_delay=50p)
 
-* Reset: AND(up, dn) inverted for active-low reset
+* Reset: AND(up, dn) drives the active-high resets directly
 Arst_and [up_d dn_d] rst_d and_mod
 .MODEL and_mod d_and(rise_delay=100p fall_delay=100p)
-
-Arst_inv rst_d rst_n inv_mod
-.MODEL inv_mod d_inverter(rise_delay=100p fall_delay=100p)
 
 * Digital-to-analog bridges for UP/DN
 Aup_dac [up_d] [up] dac_brg
@@ -68,24 +66,25 @@ Nlf cp_out vctrl kes_lf
 Nvco vctrl clk_out clk_outb kes_vco
 
 **********************************************************************
-* Divider — div-by-64 using 6 XSPICE toggle flip-flops
+* Divider — toggle chain (D <- Qbar) of XSPICE flip-flops, set/reset
+* held low; feedback from q4 = div-by-32 (25 MHz x 32 = 800 MHz, inside
+* the behavioral VCO range; div-by-64 would ask for 1.6 GHz)
 **********************************************************************
 Aclk_adc [clk_out] [clk_d] adc_brg
 
-Ad1 d1 pull_hi
-At1 tie_hi pull_hi
+At1 tie_hi pull_lo
 
-Aff0 d1 clk_d  tie_hi tie_hi q0 q0b tff_mod
-Aff1 d1 q0     tie_hi tie_hi q1 q1b tff_mod
-Aff2 d1 q1     tie_hi tie_hi q2 q2b tff_mod
-Aff3 d1 q2     tie_hi tie_hi q3 q3b tff_mod
-Aff4 d1 q3     tie_hi tie_hi q4 q4b tff_mod
-Aff5 d1 q4     tie_hi tie_hi q5 q5b tff_mod
+Aff0 q0b clk_d  tie_hi tie_hi q0 q0b tff_mod
+Aff1 q1b q0     tie_hi tie_hi q1 q1b tff_mod
+Aff2 q2b q1     tie_hi tie_hi q2 q2b tff_mod
+Aff3 q3b q2     tie_hi tie_hi q3 q3b tff_mod
+Aff4 q4b q3     tie_hi tie_hi q4 q4b tff_mod
+Aff5 q5b q4     tie_hi tie_hi q5 q5b tff_mod
 
 .MODEL tff_mod d_dff(clk_delay=50p set_delay=50p reset_delay=50p
 + ic=0 rise_delay=50p fall_delay=50p)
 
-Afb_dac [q5] [fb_clk] dac_brg
+Afb_dac [q4] [fb_clk] dac_brg
 
 **********************************************************************
 * Monitor

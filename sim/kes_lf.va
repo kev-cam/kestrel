@@ -26,6 +26,9 @@ module kes_lf(inp, vctrl);
         I(mid) <+ c1 * ddt(V(mid));
 
         // Output = mid node
-        V(vctrl) <+ V(mid);
+        // Output is the charge-pump node, so the VCO sees the R1-C1 zero
+        // (tapping mid, the voltage across C1, hides the zero: no phase
+        // margin, the loop rings at its natural frequency and never settles)
+        V(vctrl) <+ V(inp);
     end
 endmodule

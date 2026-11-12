@@ -28,11 +28,12 @@ circbyline .MODEL adc_brg adc_bridge(in_low=0.8 in_high=1.0)
 * Pullups for digital tie-high (scalar ports, no brackets)
 circbyline Ad_hi d_hi pull_hi
 circbyline .MODEL pull_hi d_pullup(load=1p)
-circbyline As_hi set_hi pull_hi
+circbyline As_lo set_hi pull_lo
+circbyline .MODEL pull_lo d_pulldown(load=1p)
 *
 * PFD DFFs (all scalar ports)
-circbyline Aup_ff d_hi ref_d set_hi rst_n up_d up_db dff_mod
-circbyline Adn_ff d_hi fb_d set_hi rst_n dn_d dn_db dff_mod
+circbyline Aup_ff d_hi ref_d set_hi rst_d up_d up_db dff_mod
+circbyline Adn_ff d_hi fb_d set_hi rst_d dn_d dn_db dff_mod
 circbyline .MODEL dff_mod d_dff(clk_delay=50p set_delay=50p reset_delay=50p ic=0 rise_delay=50p fall_delay=50p)
 *
 * Reset logic (d_and: input=vector, output=scalar; d_inverter: all scalar)
@@ -55,18 +56,20 @@ circbyline Nlf cp_out vctrl lf_mod
 * VCO (OSDI)
 circbyline Nvco vctrl clk_out clk_outb vco_mod
 *
-* Divider — div-by-64 (adc_bridge=vector, d_dff=scalar, dac_bridge=vector)
+* Divider — toggle chain (D <- Qbar), feedback from q4 = div-by-32: 25 MHz x 32 = 800 MHz,
+* inside the behavioral VCO range (div-by-64 would ask for 1.6 GHz, which it cannot reach)
+* (adc_bridge=vector, d_dff=scalar, dac_bridge=vector; XSPICE set/reset are ACTIVE-HIGH)
 circbyline Aclk_adc [clk_out] [clk_d] adc_brg
 circbyline Ad1 d1 pull_hi
-circbyline At1 tie_hi pull_hi
-circbyline Aff0 d1 clk_d tie_hi tie_hi q0 q0b tff_mod
-circbyline Aff1 d1 q0 tie_hi tie_hi q1 q1b tff_mod
-circbyline Aff2 d1 q1 tie_hi tie_hi q2 q2b tff_mod
-circbyline Aff3 d1 q2 tie_hi tie_hi q3 q3b tff_mod
-circbyline Aff4 d1 q3 tie_hi tie_hi q4 q4b tff_mod
-circbyline Aff5 d1 q4 tie_hi tie_hi q5 q5b tff_mod
+circbyline At1 tie_hi pull_lo
+circbyline Aff0 q0b clk_d tie_hi tie_hi q0 q0b tff_mod
+circbyline Aff1 q1b q0 tie_hi tie_hi q1 q1b tff_mod
+circbyline Aff2 q2b q1 tie_hi tie_hi q2 q2b tff_mod
+circbyline Aff3 q3b q2 tie_hi tie_hi q3 q3b tff_mod
+circbyline Aff4 q4b q3 tie_hi tie_hi q4 q4b tff_mod
+circbyline Aff5 q5b q4 tie_hi tie_hi q5 q5b tff_mod
 circbyline .MODEL tff_mod d_dff(clk_delay=50p set_delay=50p reset_delay=50p ic=0 rise_delay=50p fall_delay=50p)
-circbyline Afb_dac [q5] [fb_clk] dac_brg
+circbyline Afb_dac [q4] [fb_clk] dac_brg
 *
 * Monitor
 circbyline Rmon vctrl vctrl_mon 1k
@@ -86,12 +89,9 @@ wrdata kes_beh_fbclk.csv V(fb_clk)
 * Measurements
 meas tran vctrl_final FIND V(vctrl_mon) AT=3.9u
 meas tran t_lock WHEN V(vctrl_mon)=0.85 RISE=1
-meas tran t1 WHEN V(clk_out)=0.9 RISE=LAST-1
-meas tran t2 WHEN V(clk_out)=0.9 RISE=LAST
-let f_vco = 1/(t2 - t1)
 echo
 echo === Behavioral PLL Results ===
-print vctrl_final t_lock f_vco
+print vctrl_final t_lock
 echo
 
 quit

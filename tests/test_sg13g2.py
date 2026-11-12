@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from kestrel.process import get_process_params
 from kestrel.generators.pll.engine import PLLSpec, design_pll
 from kestrel.generators.pll.models.spice import emit_spice
+from kestrel.generators.pll.models.verilog_ams import emit_verilog_ams
 
 PASS = 0
 FAIL = 0
@@ -96,6 +97,13 @@ def test_emitted_files():
         check('charge-pump mirror references have the right polarity',
               re.search(r'^Ibias_p pbias vss ', cp, re.M) is not None and
               re.search(r'^Ibias_n vdd nbias ', cp, re.M) is not None)
+        lf = open(os.path.join(out, 'kestrel_loop_filter.sp')).read()
+        check('loop filter output is the charge-pump node (zero visible to the VCO)',
+              re.search(r'^Rout in out 1\s*$', lf, re.M) is not None)
+        emit_verilog_ams(design, out)
+        vams = open(os.path.join(out, 'kestrel_loop_filter.vams')).read()
+        check('VAMS loop filter output is the charge-pump node',
+              'V(vctrl) <+ V(inp);' in vams and 'V(vctrl) <+ V(mid);' not in vams)
         top = open(os.path.join(out, 'kestrel_pll_top.sp')).read()
         check('charge pump UP/DN swapped for negative Kvco',
               re.search(r'^Xcp cp_out dn up pbias nbias', top, re.M) is not None)

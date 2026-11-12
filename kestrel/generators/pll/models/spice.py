@@ -480,6 +480,14 @@ def _write_loop_filter(d: PLLDesign, out: str) -> str:
         f.write(f"""\
 **********************************************************************
 * Loop filter — second-order passive (series R+C1, shunt C2)
+*
+* The control voltage is the charge-pump node itself, where the pump
+* current sees Z(s) = (R1 + 1/sC1) || 1/sC2 and the R1-C1 branch adds the
+* stabilizing zero.  Tapping the node across C1 instead (an earlier
+* version did) hides that zero from the VCO: the loop becomes a pure
+* double integrator with no phase margin and rings at its natural
+* frequency without settling (seen in Xyce on SG13G2: ±17 mV, ±9 ns of
+* phase error at ~0.85 MHz, undamped over 3 us).
 **********************************************************************
 .SUBCKT kestrel_loop_filter in out vss
 
@@ -492,8 +500,8 @@ R1 in mid {_eng(d.r_filter)}
 * C1: main integrating capacitor
 C1 mid vss {_eng(d.c1)}
 
-* Output is voltage across C1
-Rout mid out 1
+* Output is the charge-pump node (R1 + C1 in series, C2 shunt)
+Rout in out 1
 
 .ENDS kestrel_loop_filter
 """)

@@ -80,9 +80,15 @@ drive every representation.
 - **Behavioral VCO model** (`sim/kes_vco.va`) — Van der Pol oscillator in
   Verilog-A, compiled to OSDI for ngspice. Self-starting, frequency
   proportional to V(vctrl).
-- **Behavioral PLL testbench** (`sim/kes_run_beh.sp`) — full PLL loop in
-  ngspice using OSDI models (VCO, charge pump, loop filter) + XSPICE
-  digital (PFD, divider). Locks to reference.
+- **Behavioral PLL testbench** (`sim/kes_run_beh.sp`, plain-netlist twin
+  `sim/kes_tb_beh.sp`) — full PLL loop in ngspice using OSDI models (VCO,
+  charge pump, loop filter) + XSPICE digital (PFD, divider).  Fixed in
+  November 2026: XSPICE `d_dff` set/reset are active-high (the bench drove
+  them as active-low and never released reset), the divider flip-flops had
+  D tied high instead of D ← Q̄, the loop filter tapped the node across C1,
+  and /64 asked for 1.6 GHz, outside the behavioral VCO's range.  Now /32:
+  locks at 800 MHz (25 MHz reference) with the ref→fb phase error bounded
+  to ±1.4 ns; ngspice 45.2 segfaults at `quit` after writing the results.
 - **Transistor-level VCO** (`sim/kes_vco_xyce.cir`) — 4-stage differential
   Maneatis ring oscillator on sky130 BSIM4 models. Runs in Xyce with
   `.STEP` parameter sweep.
@@ -137,11 +143,27 @@ Refit behavioral model matches transistor curve within ±3.3%.
   closed-loop runs need a spec whose nominal N is a power of two
 - sky130 generated netlists still need the PDK's subcircuit model mapping
   (the bundled `sim/models` sky130 cards are binned `__model.N` names)
+- Engine loop equations omit the 2π of the PFD gain (Icp/2π A/rad):
+  `natural_freq` and `damping` come out √(2π) too high (ζ = 1.8 reported,
+  0.72 realized), `lock_time` 2π too short, and C1 = Icp·Kvco/(N·ω_bw²)
+  places the real unity-gain crossover at γ/2π ≈ 0.59 × the requested loop
+  bandwidth (phase margin there ≈ 57° for a 60° request).  Stable, but the
+  bandwidth and settling numbers in the summary are not the realized ones.
+- The behavioral SPICE template (`pll_behavioral.cir-template`) is a
+  multiplier-PD toy with a voltage-driven RC and an SDT() VCO, not a
+  charge-pump loop; the OSDI bench `sim/kes_run_beh.sp` is the behavioral
+  reference.
 - A faster first divider stage (prescaler): the six-NAND toggle stage is
   verified to 844 MHz on SG13G2 and mis-counts at 1.09 GHz, which is where
   the generated VCO sits with a discharged loop filter.  A cold power-up
   from 0 V is therefore not covered; the testbench starts at the
-  calibrated 0.2 V and the design summary warns about it.
+  calibrated 0.2 V and the design summary warns about it.  With the
+  loop-filter tap fixed this matters during acquisition too: every
+  full-width charge-pump pulse moves the control node by Icp·R1 (0.22 V
+  here, more than half the tuning range), so a cycle slip in the fast
+  direction can push the VCO past the divider's range, and the loop then
+  latches UP with nothing to reset it.  Robust cold acquisition needs the
+  divider rated for the VCO's top speed.
 
 ## Architecture
 
@@ -242,9 +264,21 @@ Schematic netlist (from design engine)
   so the summary's linear lock time (230 ns) understates the time to lock
   (estimate 0.67 us from 0.2 V; an undefined start left the loop parked at
   1.2 V on the 625 MHz floor and still unlocked after 2 us).  Closed loop
-  from 0.2 V (Xyce, 2 us): overshoot to 0.50 V at 0.85 us, within 3 % of
-  640 MHz by 1.3 us, 659 MHz at Vctrl 0.355 V at 2 us with the phase error
-  crossing zero — frequency acquired, final settling under way.
+  from 0.2 V (Xyce): the loop overshoots to 0.50 V at 0.85 us and is within
+  3 % of 640 MHz by 1.3 us.  With the original loop-filter tap (control
+  voltage taken across C1) it then never settled: Vctrl rang ±17 mV at
+  ~0.85 MHz with ±9 ns of phase error, undamped over 3 us — the natural
+  frequency of a double integrator with no zero, sqrt(Icp·Kvco/(2π·N·(C1+C2)))
+  = 0.77 MHz.  With the charge-pump node as the control voltage (tap fixed,
+  November 2026) a start-up problem shows instead: the reference's first
+  edge at t = 0 sets UP before any feedback edge exists (VCO start ~11 ns,
+  first divider edge ≥ 50 ns), that one full-width pump pulse steps the
+  control node by Icp·R1 = 0.22 V — from 0.2 V to 0 V in 25 ns — the VCO
+  runs to 1.09 GHz, the divider stops producing edges, UP never resets and
+  the loop parks at Vctrl = 0 V for the whole 3 us.  The cure in silicon is
+  a divider that counts at the VCO's top speed (prescaler, open item); in
+  the testbench the reference is released after the divider is running
+  (under test).
   Decks: `sim/kes_vco_xyce_sg13g2.cir` (hand sizing, no junction areas,
   17-point sweep ≈ 16 min) and the generated `kestrel_vco_tb.sp` (7 points
   ≈ 5 min; a 2 us closed-loop `kestrel_tb.sp` run ≈ 80 min).  Note: on a
@@ -564,7 +598,22 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
       0.50 V at 0.85 us, is back within 3 % of 640 MHz by 1.3 us and at 2 us
       sits at 659 MHz with Vctrl flat at 0.355 V and the ref→fb phase error
       passing through zero (final overdamped settling, ζ = 1.8)
-- [ ] IHP SG13G2: settled lock in the emitted 2.5 us transient (run in progress)
+- [x] Loop-filter output tap fixed in the SPICE emitter, the Verilog-AMS
+      emitter and `sim/kes_lf.va`: the VCO now sees the charge-pump node
+      (with the R1–C1 zero), not the voltage across C1.  Behavioral check
+      (ngspice/OSDI, /32, 800 MHz): old tap → phase error wandering ±20 ns,
+      new tap → bounded ±1.4 ns
+- [ ] IHP SG13G2: settled lock of the emitted PLL with the tap fixed.  The
+      first 3 us run (from 0.2 V, reference running from t = 0) did not
+      lock: the first reference edge sets UP about 50 ns before the VCO
+      (starts at ~11 ns) and the divider can produce a feedback edge; with
+      the zero now visible that one pulse steps the control node by
+      Icp·R1 = 0.22 V, from 0.2 V to 0 V within 25 ns, the VCO runs to
+      1.09 GHz, the divider produces no edges, UP stays latched and the
+      loop parks there for the whole run.  The old tap survived the same
+      race because its pulse only slewed C1 at 0.7 V/us.  Guard under
+      test: the testbench releases the reference after the divider is
+      running
 
 ### M4: Layout and Extraction — IN PROGRESS
 

@@ -219,8 +219,10 @@ module kestrel_loop_filter(inp, vctrl);
         // C1 from mid to ground (main integrating cap)
         I(mid) <+ c1 * ddt(V(mid));
 
-        // Output follows mid node (vctrl = voltage across C1)
-        V(vctrl) <+ V(mid);
+        // Output is the charge-pump node, so the VCO sees the R1-C1 zero.
+        // (Following the mid node — the voltage across C1 — would hide the
+        // zero and leave the loop with no phase margin.)
+        V(vctrl) <+ V(inp);
     end
 endmodule
 """)
