@@ -110,10 +110,32 @@ def test_emitted_files():
         lf = open(os.path.join(out, 'kestrel_loop_filter.sp')).read()
         check('loop filter output is the charge-pump node (zero visible to the VCO)',
               re.search(r'^Rout in out 1\s*$', lf, re.M) is not None)
-        emit_verilog_ams(design, out)
+        vams_files = {os.path.basename(f) for f in emit_verilog_ams(design, out)}
         vams = open(os.path.join(out, 'kestrel_loop_filter.vams')).read()
         check('VAMS loop filter output is the charge-pump node',
               'V(vctrl) <+ V(inp);' in vams and 'V(vctrl) <+ V(mid);' not in vams)
+        check('VAMS set includes the closed-loop testbench', 'kestrel_tb.vams' in vams_files)
+        vco = open(os.path.join(out, 'kestrel_vco.vams')).read()
+        check('VAMS VCO schedules the delay to its next edge (no frequency integration)',
+              'always begin' in vco and '#(td / TU);' in vco and 'V(vctrl)' in vco
+              and 'idtmod' not in vco and '$bound_step' not in vco and 'analog begin' not in vco)
+        check('VAMS VCO samples the control voltage once per stage',
+              'if (stage >= n_stages) begin' in vco and f'n_stages  = {design.spec.vco_stages}' in vco)
+        check('VAMS VCO carries stat-sim variability parameters',
+              'sigma_mm' in vco and 'sigma_j' in vco and 'function real gauss' in vco)
+        pfd_v = open(os.path.join(out, 'kestrel_pfd.vams')).read()
+        div_v = open(os.path.join(out, 'kestrel_divider.vams')).read()
+        check('VAMS PFD and divider are event-driven logic (no analog block)',
+              'analog begin' not in pfd_v and 'analog begin' not in div_v
+              and 'always @(posedge ref_clk or posedge rst)' in pfd_v
+              and 'always @(posedge clk_in)' in div_v and f'n_div   = {design.n_nom};' in div_v)
+        top_v = open(os.path.join(out, 'kestrel_pll_top.vams')).read()
+        check('VAMS top swaps the pump inputs for negative Kvco',
+              '.up(dn),' in top_v and '.dn(up),' in top_v)
+        tb_v = open(os.path.join(out, 'kestrel_tb.vams')).read()
+        m_tb = re.search(r'ref_delay = ([0-9.e+-]+);', tb_v)
+        check('VAMS testbench releases the reference after the divider runs',
+              m_tb is not None and float(m_tb.group(1)) >= 2.0 / design.spec.ref_freq)
         top = open(os.path.join(out, 'kestrel_pll_top.sp')).read()
         check('charge pump UP/DN swapped for negative Kvco',
               re.search(r'^Xcp cp_out dn up pbias nbias', top, re.M) is not None)
