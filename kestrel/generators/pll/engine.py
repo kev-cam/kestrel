@@ -54,6 +54,8 @@ class PLLDesign:
     lock_time: float = 0.0       # seconds — linear settling (estimated)
     acq_time: float = 0.0        # seconds — slew-limited acquisition from a
                                  #   discharged loop filter (estimated)
+    ripple_step: float = 0.0     # V — Icp*R1: the step one full-width pump
+                                 #   pulse puts on the control node
     pm_actual: float = 0.0       # degrees — actual phase margin
     jitter_est: float = 0.0      # seconds rms — estimated jitter
 
@@ -263,6 +265,32 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
         d.acq_time = c_total * abs(d.vctrl_nom - d.vctrl_start) / (d.icp / 2.0) \
             + d.lock_time
 
+    # --- Charge-pump ripple step ---
+    # The control node is the charge-pump node (R1 + C1 in series, C2
+    # shunt), so a pump pulse longer than R1*C2 steps it by Icp*R1 for the
+    # duration of the pulse.  In lock the pulses are picoseconds wide and
+    # the step is harmless; while the PFD cycle-slips they are up to a
+    # reference period long and the VCO is thrown by the full step.  When
+    # that is a large part of the tuning range, a slip in the fast
+    # direction can carry a negative-Kvco VCO past what the divider chain
+    # follows, and the PFD then latches with nothing to reset it (seen on
+    # SG13G2: a 0.22 V step on a 0.3 V range).  The closed-loop testbench
+    # releases the reference only after the divider is running for the
+    # same reason.  Icp*R1 = 2*pi*N*f_c/Kvco, so a lower loop bandwidth
+    # shrinks it.
+    d.ripple_step = d.icp * d.r_filter
+    if cal and cal.get("vctrl_min") is not None and cal.get("vctrl_max") is not None:
+        v_range = cal["vctrl_max"] - cal["vctrl_min"]
+        if v_range > 0 and d.ripple_step > 0.5 * v_range:
+            d.warnings.append(
+                f"{spec.process}: one full-width charge-pump pulse steps the "
+                f"control node by Icp*R1 = {d.ripple_step * 1e3:.0f} mV, more "
+                f"than half the calibrated {cal['vctrl_min']:.2f}-"
+                f"{cal['vctrl_max']:.2f} V tuning range; during acquisition a "
+                f"cycle slip can throw the VCO past the divider's range "
+                f"(lower the loop bandwidth, or use a divider rated for the "
+                f"VCO's top speed)")
+
     # --- Jitter estimate (linear noise model) ---
     # Simplified: jitter_rms ~ 1/(2*pi*f_center) * sqrt(kT / (C1 * Vswing^2))
     # This is a rough first-order estimate.
@@ -430,6 +458,7 @@ def summarize(d: PLLDesign) -> str:
         f"  Damping ratio:   {d.damping:.2f}",
         f"  Lock time (est): {format_eng(d.lock_time, 's')}",
         f"  Acq. time (est): {format_eng(d.acq_time, 's')} (slew from Vctrl = {d.vctrl_start:.2g} V)",
+        f"  Ripple step:     {format_eng(d.ripple_step, 'V')} (Icp*R1, one full-width pump pulse)",
         f"  Jitter (est):    {format_eng(d.jitter_est, 's')} rms",
     ]
     if d.warnings:

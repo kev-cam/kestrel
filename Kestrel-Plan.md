@@ -62,9 +62,12 @@ drive every representation.
   toggle stage, an open-loop VCO characterization deck
   (`kestrel_vco_tb.sp`), and swaps the charge-pump UP/DN inputs for VCOs
   with negative Kvco.  The closed-loop testbench starts the loop filter at
-  a defined point (`.IC`, 0 V or the process's calibrated minimum) and runs
-  long enough for the slew-limited acquisition, which the design summary
-  reports next to the linear lock-time estimate.
+  a defined point (`.IC`, 0 V or the process's calibrated minimum),
+  releases the reference only after the VCO and the divider have produced
+  their first edges (a reference edge arriving first latches UP, and one
+  full-width pump pulse steps the control node by Icp·R1), and runs long
+  enough for the slew-limited acquisition, which the design summary
+  reports next to the linear lock-time estimate and the ripple step.
 - **IHP SG13G2 transistor-level path** (November 2026) — Xyce-native PSP103
   TT cards plus wrappers with IHP's `sg13_lv_nmos/pmos` subcircuit
   interface, bundled in `sim/models/` and copied next to every generated
@@ -276,12 +279,27 @@ Schematic netlist (from design engine)
   control node by Icp·R1 = 0.22 V — from 0.2 V to 0 V in 25 ns — the VCO
   runs to 1.09 GHz, the divider stops producing edges, UP never resets and
   the loop parks at Vctrl = 0 V for the whole 3 us.  The cure in silicon is
-  a divider that counts at the VCO's top speed (prescaler, open item); in
-  the testbench the reference is released after the divider is running
-  (under test).
+  a divider that counts at the VCO's top speed (prescaler, open item); the
+  testbench now releases the reference after the divider is running
+  (`PULSE(0 1.2 115.8n ...)`, two divider periods after the ring starts),
+  so the PFD's first event is a feedback edge and the pump's first pulse
+  pushes the VCO towards the slow end, where the divider keeps counting.
+  With that guard (Xyce, 3 us): locks.  The PFD's first event is the
+  feedback edge at ~50 ns and the pump pushes the control node to
+  0.43–0.46 V (VCO 563–617 MHz, divider counting) until the first
+  reference edge at 116 ns; the loop then
+  pulls the VCO up through 625 MHz at 0.65 us, peaks at 644 MHz (+0.7 %)
+  at 1.0 us and is at 640.0 MHz from 1.6 us on.  Over 1.5–3 us:
+  f = 640.00 MHz (±0.01 %), Vctrl 0.361–0.373 V (the 12 mV spread is the
+  per-pulse ripple on the charge-pump node), ref→fb phase offset
+  0.45–0.58 ns and steady, PFD pulses 4–5 % UP / 3 % DN (reset-path
+  widths).  Lock well inside the emitted 2.6 us transient; the 3 us run
+  took 2.1 h in Xyce (132k steps).
   Decks: `sim/kes_vco_xyce_sg13g2.cir` (hand sizing, no junction areas,
   17-point sweep ≈ 16 min) and the generated `kestrel_vco_tb.sp` (7 points
-  ≈ 5 min; a 2 us closed-loop `kestrel_tb.sp` run ≈ 80 min).  Note: on a
+  ≈ 5 min; a closed-loop `kestrel_tb.sp` run ≈ 80 min for 2 us with the
+  old tap and 2–3.5 h for 3 us with the charge-pump node as the control
+  voltage — the pulse ripple costs Xyce many more time steps).  Note: on a
   Xyce that supplies PSP103 through the Verilog-A `.HDL` path (PyMS) every
   run pays a ~2 min model compile before the transient starts.
 
@@ -603,17 +621,31 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
       (with the R1–C1 zero), not the voltage across C1.  Behavioral check
       (ngspice/OSDI, /32, 800 MHz): old tap → phase error wandering ±20 ns,
       new tap → bounded ±1.4 ns
-- [ ] IHP SG13G2: settled lock of the emitted PLL with the tap fixed.  The
-      first 3 us run (from 0.2 V, reference running from t = 0) did not
-      lock: the first reference edge sets UP about 50 ns before the VCO
-      (starts at ~11 ns) and the divider can produce a feedback edge; with
-      the zero now visible that one pulse steps the control node by
-      Icp·R1 = 0.22 V, from 0.2 V to 0 V within 25 ns, the VCO runs to
-      1.09 GHz, the divider produces no edges, UP stays latched and the
-      loop parks there for the whole run.  The old tap survived the same
-      race because its pulse only slewed C1 at 0.7 V/us.  Guard under
-      test: the testbench releases the reference after the divider is
-      running
+- [x] IHP SG13G2: start-up race found and guarded.  With the tap fixed, a
+      3 us run from 0.2 V with the reference running from t = 0 did not
+      lock: the first reference edge set UP about 50 ns before the VCO
+      (starts at ~11 ns) and the divider could produce a feedback edge;
+      with the zero now visible that one pulse stepped the control node by
+      Icp·R1 = 0.22 V, from 0.2 V to 0 V within 25 ns, the VCO ran to
+      1.09 GHz, the divider produced no edges, UP stayed latched and the
+      loop parked there for the whole run (the old tap survived the same
+      race because its pulse only slewed C1 at 0.7 V/us).  The testbench
+      now releases the reference after the divider is running (two divider
+      periods after the ring starts, 116 ns here) and the design summary
+      reports the ripple step Icp·R1 with a warning when it exceeds half
+      the tuning range
+- [x] IHP SG13G2: closed loop of the emitted PLL, tap fixed and reference
+      released late (Xyce, 3 us): locks.  The PFD's first event is the
+      feedback edge at ~50 ns and the pump pushes the control node to
+      0.43–0.46 V (VCO 563–617 MHz, divider counting) until the first
+      reference edge at 116 ns; the loop then
+      pulls the VCO up through 625 MHz at 0.65 us, peaks at 644 MHz (+0.7 %)
+      at 1.0 us and is at 640.0 MHz from 1.6 us on.  Over 1.5–3 us:
+      f = 640.00 MHz (±0.01 %), Vctrl 0.361–0.373 V (the 12 mV spread is the
+      per-pulse ripple on the charge-pump node), ref→fb phase offset
+      0.45–0.58 ns and steady, PFD pulses 4–5 % UP / 3 % DN (reset-path
+      widths).  Lock well inside the emitted 2.6 us transient; the 3 us run
+      took 2.1 h in Xyce (132k steps)
 
 ### M4: Layout and Extraction — IN PROGRESS
 

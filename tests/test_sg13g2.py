@@ -80,6 +80,16 @@ def test_emitted_files():
         tstop = float(m.group(1)) * {'p': 1e-12, 'n': 1e-9, 'u': 1e-6, 'm': 1e-3, '': 1.0}[m.group(2)] if m else 0
         check('testbench transient covers the acquisition estimate',
               tstop >= design.acq_time, f'.TRAN stop {tstop:.3g} s vs acq {design.acq_time:.3g} s')
+        m = re.search(r'^Vref ref_clk 0 PULSE\(0 1\.2 ([0-9.]+)([pnum]?) ', tb, re.M)
+        tdelay = float(m.group(1)) * {'p': 1e-12, 'n': 1e-9, 'u': 1e-6, 'm': 1e-3, '': 1.0}[m.group(2)] if m else -1
+        check('reference is released after the divider runs (>= 2 ref periods)',
+              tdelay >= 2.0 / design.spec.ref_freq, f'delay {tdelay:.3g} s')
+        check('ripple step reported as Icp*R1',
+              abs(design.ripple_step - design.icp * design.r_filter) < 1e-9
+              and design.ripple_step > 0, f'{design.ripple_step:.3g} V')
+        check('design warns that the ripple step exceeds half the tuning range',
+              any('full-width charge-pump pulse' in w for w in design.warnings),
+              '; '.join(design.warnings))
         vco = open(os.path.join(out, 'kestrel_vco.sp')).read()
         devs = re.findall(r'^([MX])\S+ \S+ \S+ \S+ \S+ (\S+) W=', vco, re.M)
         check('VCO devices are X-instances of sg13_lv_* wrappers',
@@ -131,6 +141,9 @@ def test_sky130_unaffected():
         check('sky130 testbench keeps the PDK placeholder', '<path_to_pdk>' in tb)
         check('sky130 testbench starts the loop filter discharged',
               re.search(r'^\.IC V\(Xpll:vctrl\)=0\s*$', tb, re.M) is not None)
+        check('sky130 testbench also releases the reference late',
+              re.search(r'^Vref ref_clk 0 PULSE\(0 1\.8 0 ', tb, re.M) is None
+              and re.search(r'^Vref ref_clk 0 PULSE\(0 1\.8 [0-9.]+[pnum]? ', tb, re.M) is not None)
         top = open(os.path.join(out, 'kestrel_pll_top.sp')).read()
         check('sky130 charge pump keeps UP/DN order',
               re.search(r'^Xcp cp_out up dn pbias nbias', top, re.M) is not None)

@@ -659,11 +659,25 @@ def _write_testbench(d: PLLDesign, out: str) -> str:
     proc = get_process_params(d.spec.process)
     vdd = d.spec.supply_voltage
     ref_period = 1.0 / d.spec.ref_freq
+    # Release the reference only after the VCO (kicked at t = 0, running
+    # within ~10 ns) and the divider have produced their first edges.  A
+    # reference edge that arrives first sets UP with nothing to reset it,
+    # and one full-width pump pulse steps the control node by Icp*R1
+    # (d.ripple_step); on a negative-Kvco VCO that is towards top speed,
+    # where the divider chain may stop counting, and the loop then parks
+    # there (SG13G2 from 0.2 V: 0.22 V of step, Vctrl at 0 V and UP latched
+    # for the whole run).  The first feedback edge comes one divider
+    # period after the ring starts; wait two of those, and at least two
+    # reference periods.
+    cal = proc.get("vco_calibration") or {}
+    f_start = (cal.get("f_max") if d.kvco_sign < 0 else cal.get("f_min")) or d.f_center
+    t_fb1 = 20e-9 + d.n_nom / f_start if f_start > 0 else 2 * ref_period
+    ref_delay = max(2 * ref_period, 2 * t_fb1)
     # Long enough to see lock: the slew-limited acquisition from a
     # discharged loop filter (d.acq_time) dominates, not the linear
     # lock_time.
-    sim_time = max(d.acq_time * 1.5, d.lock_time * 3, 50 * ref_period) \
-        if d.lock_time > 0 else 100 * ref_period
+    sim_time = ref_delay + (max(d.acq_time * 1.5, d.lock_time * 3, 50 * ref_period)
+                            if d.lock_time > 0 else 100 * ref_period)
     if d.vctrl_start > 0:
         start_note = (f"{d.vctrl_start:.3g} V, the bottom of the calibrated Vctrl range\n"
                       f"* (from 0 V this VCO runs faster than the divider chain can follow).")
@@ -679,6 +693,9 @@ def _write_testbench(d: PLLDesign, out: str) -> str:
 * Linear settling time:  ~{format_eng(d.lock_time, 's')}
 * Expected acquisition:  ~{format_eng(d.acq_time, 's')} (charge pump slewing the loop
 *   filter from {d.vctrl_start:.2g} V to Vctrl ~ {d.vctrl_nom:.2f} V at ~Icp/2, plus settling)
+* Pump ripple step:      ~{format_eng(d.ripple_step, 'V')} (Icp*R1, one full-width pulse on
+*   the control node)
+* Reference released at: {_eng(ref_delay)} (after the divider's first edges)
 *
 
 {_model_section(proc)}
@@ -701,7 +718,11 @@ Vss vss 0 0
 **********************************************************************
 * Reference clock — {format_eng(d.spec.ref_freq, 'Hz')}
 **********************************************************************
-Vref ref_clk 0 PULSE(0 {vdd} 0 100p 100p {_eng(ref_period/2)} {_eng(ref_period)})
+* Released at {_eng(ref_delay)}, once the VCO and the divider are running: a
+* reference edge before the first feedback edge sets UP with nothing to
+* reset it, and one full-width pump pulse (Icp*R1 = {format_eng(d.ripple_step, 'V')})
+* can carry a negative-Kvco VCO past the divider's range for good.
+Vref ref_clk 0 PULSE(0 {vdd} {_eng(ref_delay)} 100p 100p {_eng(ref_period/2)} {_eng(ref_period)})
 
 **********************************************************************
 * DUT
