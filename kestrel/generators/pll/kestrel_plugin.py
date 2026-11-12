@@ -23,6 +23,7 @@ def run(args):
     from kestrel.spec import parse_freq, parse_time
     from .engine import PLLSpec, design_pll, summarize
     from .models.verilog_ams import emit_verilog_ams
+    from .models.statsim import emit_statsim
     from .models.spice import emit_spice
     from .models.behavioral import emit_behavioral, emit_kicad_sch
 
@@ -46,6 +47,10 @@ def run(args):
     print(summarize(design))
     print()
     files = emit_verilog_ams(design, args.output)
+    for f in files:
+        print(f"  wrote {f}")
+    print()
+    files = emit_statsim(design, args.output)
     for f in files:
         print(f"  wrote {f}")
     print()
