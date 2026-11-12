@@ -153,7 +153,7 @@ with replica-biased symmetric load delay cells.</p>
 <tr><th>Output</th><th>Tool</th><th>Status</th></tr>
 <tr><td>Verilog-AMS behavioral model (event-driven logic, delay-to-next-edge VCO) + testbench</td><td>logic checked with iverilog</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>nvc / stat-sim model with timing variability</td><td>nvc + stat-sim</td><td><span class="tag done">Done</span></td></tr>
-<tr><td>SPICE transistor-level netlist</td><td>Xyce, ngspice</td><td><span class="tag done">Done</span></td></tr>
+<tr><td>SPICE transistor-level netlist + run_tb.sh</td><td>VACASK via vamos (default), Xyce</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>Behavioral PLL testbench (event-driven XSPICE)</td><td>ngspice (+ OSDI in sim/)</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>Transistor-level VCO testbench</td><td>Xyce + sky130</td><td><span class="tag done">Done</span></td></tr>
 <tr><td>KiCad schematic</td><td>KiCad 10</td><td><span class="tag done">Done</span></td></tr>
@@ -182,6 +182,10 @@ kestrel gui --process sky130
 <pre>
 # Generated event-driven bench on stock ngspice (0.1 s)
 cd kestrel_out &amp;&amp; ngspice -b kestrel_pll_behavioral.cir
+
+# Transistor-level closed loop: VACASK through vamos (SG13G2: 352 s for 2.6 us);
+# --vamos-xyce or --xyce for Xyce (2.1 h for 3 us)
+bash kestrel_out/run_tb.sh
 
 # Generated nvc/stat-sim form, 20-seed Monte-Carlo with timing variability
 SIGMA_J=0.01 SIGMA_MM=0.02 bash run_statsim.sh --mc 20

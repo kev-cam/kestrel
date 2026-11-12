@@ -50,6 +50,15 @@ _PROCESS_PARAMS = {
         # them next to the generated netlist and includes them in this order,
         # so `kestrel pll gen --process sg13g2` output simulates as-is.
         "model_files": ["sg13g2_psp103_tt.lib", "sg13g2_lv.lib"],
+        # vamos (spectre personality) on VACASK / Xyce: a wrapper library over
+        # the PDK's own PSP103 cards and psp103.va (Spectre refuses the PDK
+        # wrappers' m= parameter); the PDK directories below are passed as
+        # -I include paths by the generated run_tb.sh.
+        "vamos_model_files": ["sg13g2_lv_vamos.lib"],
+        "pdk_root_env": "IHP_PDK_ROOT",
+        "pdk_root_default": "/usr/local/src/IHP-Open-PDK",
+        "pdk_include_dirs": ["ihp-sg13g2/libs.tech/verilog-a/psp103",
+                             "ihp-sg13g2/libs.tech/ngspice/models"],
         # Transistor-level calibration (Xyce, PSP103 TT, 1.2 V, 2026-11-11).
         # Sizing from sim/kes_vco_xyce_sg13g2.cir; the numbers below were
         # measured on the *generated* VCO (kestrel_vco_tb.sp, sg13_lv_*

@@ -39,6 +39,8 @@ def emit_spice(design: PLLDesign, output_dir: str) -> list:
     files.append(_write_divider(design, output_dir))
     files.append(_write_pll_top(design, output_dir))
     files.append(_write_testbench(design, output_dir))
+    files.append(_write_vamos_testbench(design, output_dir))
+    files.append(_write_runner(design, output_dir))
     files.append(_write_vco_testbench(design, output_dir))
     files += _copy_model_files(design, output_dir)
     return files
@@ -46,7 +48,7 @@ def emit_spice(design: PLLDesign, output_dir: str) -> list:
 
 def _bundled_models(proc: dict) -> list:
     """Absolute paths of the process's bundled model files, or [] if any is missing."""
-    names = proc.get("model_files", [])
+    names = proc.get("model_files", []) + proc.get("vamos_model_files", [])
     paths = [os.path.join(_SIM_MODELS_DIR, n) for n in names]
     return paths if names and all(os.path.isfile(p) for p in paths) else []
 
@@ -290,6 +292,10 @@ Rbias vctrl_int vctrl 100k
 Xbufp outp dp_{n_stg - 1} dn_{n_stg - 1} vbn vdd vss kestrel_vco_buf
 Xbufn outn dn_{n_stg - 1} dp_{n_stg - 1} vbn vdd vss kestrel_vco_buf
 
+* Start-up kick: breaks the ring's symmetric (non-oscillating) DC point.
+* Inside the subcircuit so every deck shares it (Spectre/vamos take no
+* hierarchical node on a terminal); period 1 s = one pulse per run.
+Ikick 0 dp_0 PULSE(0 1m 0 50p 50p 10n 1)
 .ENDS kestrel_vco
 """)
     return path
@@ -635,8 +641,7 @@ Cload_p outp 0 10f
 Cload_n outn 0 10f
 Ediff diff 0 outp outn 1.0
 
-* Startup kick — breaks the symmetric (non-oscillating) solution
-Ikick 0 Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
+* (the start-up kick is inside kestrel_vco: Ikick on its dp_0 node)
 
 .TRAN 50p {_eng(tstop)}
 .PRINT TRAN V(outp) V(outn) V(vctrl) V(Xvco:vbn) V(diff)
@@ -654,8 +659,16 @@ Ikick 0 Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
 # Testbench
 # ======================================================================
 
-def _write_testbench(d: PLLDesign, out: str) -> str:
-    path = os.path.join(out, "kestrel_tb.sp")
+def _testbench_text(d: PLLDesign, vamos: bool = False) -> str:
+    """The closed-loop testbench.
+
+    vamos=False: Xyce dialect (kestrel_tb.sp: Xyce hierarchical names, bundled
+    Xyce-native cards).  vamos=True: the same deck for vamos's spectre
+    personality in SPICE mode (kestrel_tb_vamos.sp), run on VACASK by default
+    or on Xyce with --vamos-analog=xyce: Spectre hierarchical names and the
+    process's vamos model library (sg13g2: the PDK's own PSP103 cards and
+    psp103.va through a wrapper library, see _vamos_model_section).
+    """
     proc = get_process_params(d.spec.process)
     vdd = d.spec.supply_voltage
     ref_period = 1.0 / d.spec.ref_freq
@@ -685,11 +698,19 @@ def _write_testbench(d: PLLDesign, out: str) -> str:
         start_note = "discharged, 0 V (power-up)."
     tstep = ref_period / 20
 
-    with open(path, "w") as f:
-        f.write(f"""\
-* Kestrel PLL Testbench
+    models = _vamos_model_section(proc) if vamos else _model_section(proc)
+    ic_line = (f".ic v(xpll.vctrl)={d.vctrl_start:.3g}" if vamos
+               else f".IC V(Xpll:vctrl)={d.vctrl_start:.3g}")
+    print_line = (".print tran v(clk_out) v(vctrl_mon) v(ref_clk) v(xpll.fb_clk) v(xpll.up) v(xpll.dn)"
+                  if vamos else
+                  ".PRINT TRAN V(clk_out) V(vctrl_mon) V(ref_clk) V(Xpll:fb_clk) V(Xpll:up) V(Xpll:dn)")
+    run_line = ("bash run_tb.sh            (vamos spectre on VACASK; --vamos-xyce for Xyce through vamos)"
+                if vamos else "Xyce kestrel_tb.sp        (or: bash run_tb.sh --xyce)")
+    return f"""\
+* Kestrel PLL Testbench{' — vamos / VACASK deck' if vamos else ''}
 *
 * Process: {d.spec.process}
+* Run:     {run_line}
 * Linear settling time:  ~{format_eng(d.lock_time, 's')}
 * Expected acquisition:  ~{format_eng(d.acq_time, 's')} (charge pump slewing the loop
 *   filter from {d.vctrl_start:.2g} V to Vctrl ~ {d.vctrl_nom:.2f} V at ~Icp/2, plus settling)
@@ -698,7 +719,7 @@ def _write_testbench(d: PLLDesign, out: str) -> str:
 * Reference released at: {_eng(ref_delay)} (after the divider's first edges)
 *
 
-{_model_section(proc)}
+{models}
 **********************************************************************
 * Include all subcircuits
 **********************************************************************
@@ -729,15 +750,14 @@ Vref ref_clk 0 PULSE(0 {vdd} {_eng(ref_delay)} 100p 100p {_eng(ref_period/2)} {_
 **********************************************************************
 Xpll clk_out clk_outb vctrl_mon ref_clk vdd vss kestrel_pll_top
 
-* Startup kick — breaks the ring's symmetric (non-oscillating) DC point
-Ikick 0 Xpll:Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
+* (the start-up kick is inside kestrel_vco: Ikick on its dp_0 node)
 
 * Loop filter start point: {start_note}
 * Without a defined start the operating point parks Vctrl wherever the
 * idle charge pump's leakage leaves it — an arbitrary point that can put
 * the VCO outside its tuning range and stretch acquisition well past the
 * transient.
-.IC V(Xpll:vctrl)={d.vctrl_start:.3g}
+{ic_line}
 
 **********************************************************************
 * Simulation
@@ -747,8 +767,80 @@ Ikick 0 Xpll:Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
 **********************************************************************
 * Output
 **********************************************************************
-.PRINT TRAN V(clk_out) V(vctrl_mon) V(ref_clk) V(Xpll:fb_clk) V(Xpll:up) V(Xpll:dn)
+{print_line}
 
 .END
+"""
+
+
+def _write_testbench(d: PLLDesign, out: str) -> str:
+    path = os.path.join(out, "kestrel_tb.sp")
+    with open(path, "w") as f:
+        f.write(_testbench_text(d))
+    return path
+
+
+def _write_vamos_testbench(d: PLLDesign, out: str) -> str:
+    path = os.path.join(out, "kestrel_tb_vamos.sp")
+    with open(path, "w") as f:
+        f.write(_testbench_text(d, vamos=True))
+    return path
+
+
+def _vamos_model_section(proc: dict) -> str:
+    """Model includes of the vamos deck.
+
+    A process with a bundled vamos wrapper library (vamos_model_files, e.g.
+    sg13g2_lv_vamos.lib: the PDK's PSP103 cards and psp103.va, resolved
+    through the -I directories run_tb.sh passes) includes that; otherwise
+    the Xyce-native section is reused (vamos maps the common SPICE levels
+    itself).
+    """
+    stars = "*" * 70
+    if proc.get("vamos_model_files") and _bundled_models(proc):
+        inc = "".join(f'.INCLUDE "models/{n}"\n' for n in proc["vamos_model_files"])
+        dirs = " ".join(proc.get("pdk_include_dirs", []))
+        return (f"{stars}\n"
+                f"* Process models for vamos — bundled wrapper library over the PDK's own\n"
+                f"* cards and Verilog-A; run_tb.sh passes the PDK directories\n"
+                f"*   {dirs}\n"
+                f"* as -I include paths (${proc.get('pdk_root_env', 'PDK_ROOT')}, default\n"
+                f"* {proc.get('pdk_root_default', '<pdk checkout>')})\n"
+                f"{stars}\n{inc}")
+    return _model_section(proc)
+
+
+def _write_runner(d: PLLDesign, out: str) -> str:
+    """run_tb.sh: VACASK through vamos by default, Xyce on request."""
+    path = os.path.join(out, "run_tb.sh")
+    proc = get_process_params(d.spec.process)
+    env = proc.get("pdk_root_env", "PDK_ROOT")
+    dflt = proc.get("pdk_root_default", "")
+    incs = " ".join(f'-I"$PDK/{dd}"' for dd in proc.get("pdk_include_dirs", []))
+    with open(path, "w") as f:
+        f.write(f"""\
+#!/bin/bash
+# Kestrel closed-loop testbench runner — {d.spec.process}
+#
+#   bash run_tb.sh               VACASK through vamos's spectre personality
+#                                (the default for functional transistor-level runs)
+#   bash run_tb.sh --vamos-xyce  Xyce through vamos, same deck (kestrel_tb_vamos.sp)
+#   bash run_tb.sh --xyce        Xyce directly on the Xyce-dialect deck (kestrel_tb.sp)
+#
+# Environment: SV2GHDL (the sv2ghdl/vamos checkout, default /usr/local/src/sv2ghdl),
+#   {env} (the PDK checkout, default {dflt or 'unset'}), XYCE (default Xyce).
+# Results: kestrel_tb.raw (nutascii) and kestrel_tb.log from vamos.
+set -e
+cd "$(dirname "$0")"
+SV2GHDL=${{SV2GHDL:-/usr/local/src/sv2ghdl}}
+PDK=${{{env}:-{dflt}}}
+ANALOG=
+case "$1" in
+  --xyce) exec "${{XYCE:-Xyce}}" kestrel_tb.sp ;;
+  --vamos-xyce) ANALOG=--vamos-analog=xyce ;;
+esac
+exec "$SV2GHDL/shims/spectre" $ANALOG {incs} +log kestrel_tb.log -format nutascii \\
+     -raw kestrel_tb.raw kestrel_tb_vamos.sp
 """)
+    os.chmod(path, 0o755)
     return path

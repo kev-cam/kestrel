@@ -1,0 +1,71 @@
+* sg13g2_lv_vamos.lib — IHP SG13G2 low-voltage MOS wrappers for vamos (spectre
+* personality, SPICE mode) on VACASK or Xyce.  Bundled with Kestrel's SPICE
+* output as models/sg13g2_lv_vamos.lib; kestrel_tb_vamos.sp includes it.
+*
+* Same interface as the PDK's sg13_lv_nmos / sg13_lv_pmos (w, l, ng, as, ad,
+* ps, pd), on the PDK's own PSP103 cards (sg13g2_moslv_parm.lib, psp103va)
+* compiled from the PDK's psp103.va.  The PDK wrappers declare m= as a
+* subckt parameter, which Spectre's rules (and vamos) refuse: m is every
+* subckt's implicit multiplicity, so it is left out here.  Junction geometry
+* defaults follow the PDK: z1 = 0.34u contacted edge, z2 = 0.38u shared edge
+* (single-finger / odd-ng formula).
+*
+* The .hdl and .include below are relative: run_tb.sh passes the PDK's
+*   ihp-sg13g2/libs.tech/verilog-a/psp103 and ihp-sg13g2/libs.tech/ngspice/models
+* as -I include directories (IHP_PDK_ROOT, default /usr/local/src/IHP-Open-PDK).
+* Model data: Copyright 2023 IHP PDK Authors, Apache-2.0 (IHP-Open-PDK).
+*
+* TT corner multipliers, copied from cornerMOSlv.lib section mos_tt (the PDK's
+* .lib section also includes the wrappers this file replaces)
+  .param sg13g2_lv_nmos_vfbo   = 1.0
+  .param sg13g2_lv_nmos_ctl    = 1.2080
+  .param sg13g2_lv_nmos_rsw1   = 0.7200
+  .param sg13g2_lv_nmos_muew   = 0.8500
+  .param sg13g2_lv_nmos_dphibo = 0.9915
+  .param sg13g2_lv_nmos_dphibl = 0.9693
+  .param sg13g2_lv_nmos_dphibw = 0.9749
+  .param sg13g2_lv_nmos_dphiblw= 0.9754
+  .param sg13g2_lv_nmos_themuo = 0.8757
+  .param sg13g2_lv_nmos_thesatl= 0.7850
+  .param sg13g2_lv_nmos_thesatw= 1.5000
+  .param sg13g2_lv_nmos_thesatlw= 0.6127
+  .param sg13g2_lv_nmos_toxo   = 1.0000
+  .param sg13g2_lv_nmos_toxovo = 1.0000
+  .param sg13g2_lv_nmos_cjorbot= 1.0000
+  .param sg13g2_lv_nmos_cjorsti= 1.0000
+  .param sg13g2_lv_nmos_cjorgat= 1.0000
+  .param sg13g2_lv_pmos_vfbo   = 1.0
+  .param sg13g2_lv_pmos_ctl    = 1.9570
+  .param sg13g2_lv_pmos_rsw1   = 0.7720
+  .param sg13g2_lv_pmos_muew   = 1.0520
+  .param sg13g2_lv_pmos_dphibo = 0.9050
+  .param sg13g2_lv_pmos_dphibl = 0.8550
+  .param sg13g2_lv_pmos_dphibw = -1.5800
+  .param sg13g2_lv_pmos_dphiblw= 1.0000
+  .param sg13g2_lv_pmos_themuo = 0.9580
+  .param sg13g2_lv_pmos_thesatl= 0.5510
+  .param sg13g2_lv_pmos_thesatw= 1.0800
+  .param sg13g2_lv_pmos_thesatlw= 1.0000
+  .param sg13g2_lv_pmos_toxo   = 1.0000
+  .param sg13g2_lv_pmos_toxovo = 1.0000
+  .param sg13g2_lv_pmos_cjorbot= 1.0000
+  .param sg13g2_lv_pmos_cjorsti= 1.0000
+  .param sg13g2_lv_pmos_cjorgat= 1.0000
+  .param sg13g2_lv_svaricap_lap   = 1.082
+  .param sg13g2_lv_svaricap_toxo  = 1
+.param swsoa=0
+
+.hdl "psp103.va"
+.include "sg13g2_moslv_parm.lib"
+
+.subckt sg13_lv_nmos d g s b w=0.35u l=0.34u ng=1 as=0 ad=0 ps=0 pd=0 z1=0.34e-6 z2=0.38e-6 pre_layout=1 rfmode=0 trise=0
+Xmain d g s b sg13g2_lv_nmos_psp w=w l=l nf=ng
++ as='(w/ng)*(z1 + ((ng-1)/2)*z2)' ad='(w/ng)*(z1 + ((ng-1)/2)*z2)'
++ ps='2*((w/ng)*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2)' pd='2*((w/ng)*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2)'
+.ends
+
+.subckt sg13_lv_pmos d g s b w=0.35u l=0.34u ng=1 as=0 ad=0 ps=0 pd=0 z1=0.34e-6 z2=0.38e-6 pre_layout=1 rfmode=0 trise=0
+Xmain d g s b sg13g2_lv_pmos_psp w=w l=l nf=ng
++ as='(w/ng)*(z1 + ((ng-1)/2)*z2)' ad='(w/ng)*(z1 + ((ng-1)/2)*z2)'
++ ps='2*((w/ng)*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2)' pd='2*((w/ng)*((ng-1)/2 + 1) + z1 + (ng-1)/2*z2)'
+.ends

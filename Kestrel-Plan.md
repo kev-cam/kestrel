@@ -95,6 +95,51 @@ drive every representation.
   so stat-sim's metastable flops, taps and CDC traps attach directly (the
   PFD flops are the natural next target).  Needs a stat-sim checkout
   (`STATSIM_DIR`, PolyForm-Noncommercial) for `lib/statsim_disc.vhd`.
+- **VACASK through vamos as the default functional engine** (November
+  2026).  The SPICE emitter writes, next to the Xyce deck, a
+  `kestrel_tb_vamos.sp` for vamos's `spectre` personality in SPICE mode
+  and a `run_tb.sh` that runs it on VACASK (`--vamos-xyce`: Xyce through
+  vamos; `--xyce`: Xyce on the Xyce-dialect deck).  For SG13G2 the bundled
+  `models/sg13g2_lv_vamos.lib` wraps the PDK's own PSP103 cards and
+  `psp103.va` (the PDK wrappers declare `m=` as a subckt parameter, which
+  Spectre's rules refuse; the card is instantiated as an X element; the
+  TT corner multipliers are copied from `cornerMOSlv.lib`), resolved
+  through `-I` include directories under `IHP_PDK_ROOT`.  The VCO's
+  start-up kick moved inside `kestrel_vco` (a hierarchical node on a
+  terminal is a vamos v1 error) with a 1 s period (Spectre needs
+  period > rise+fall+width).  Runtimes, SG13G2 closed loop (289 PSP103
+  devices, 155 nodes), this box: VACASK via vamos **352 s wall for
+  2.616 us** (149k timepoints) against Xyce 7430 s for 3 us — about 18×
+  per simulated microsecond; the VCO testbench points take 8 s each on
+  VACASK (and 2 s on ngspice with the PDK's OSDI PSP103) against ~40 s in
+  Xyce.  Behavioural runs for comparison: iverilog logic loop 0.13 s,
+  nvc/stat-sim 0.19 s, generated ngspice bench 0.12 s, all for the same
+  2.6 us.
+- **PSP103 model gap found by the VACASK run (open, needs a decision).**
+  On VACASK the loop did not lock: Vctrl ramped from 0.2 V to the rail and
+  the VCO sat at 969 MHz.  Sweeping the generated VCO shows why — with the
+  PDK's PSP103 (the PDK's `psp103.va` on its own cards, the IHP reference
+  flow) the ring runs ~45 % faster than with Xyce's built-in level-103 on
+  the flattened TT cards, and two engines agree against Xyce:
+
+  | Vctrl | Xyce built-in PSP103 | VACASK (vamos, PDK psp103.va) | ngspice (PDK OSDI psp103.va) |
+  |------:|---------------------:|------------------------------:|-----------------------------:|
+  | 0.0 V | 1093 MHz | 1579 MHz | — |
+  | 0.2 V | 844 MHz | 1209 MHz | 1197 MHz |
+  | 0.35 V | ~660 MHz | 954 MHz | 950 MHz |
+  | 0.5 V | 517 MHz | 762 MHz | 764 MHz |
+  | 0.6 V | 511 MHz (minimum) | 760 MHz (minimum) | — |
+  | 1.0 V | 625 MHz (floor) | 963 MHz (floor) | — |
+
+  So `vco_calibration` for sg13g2 (measured on Xyce) is engine-specific:
+  with the PDK models the generated VCO cannot reach the 560–720 MHz
+  example at all (its minimum is ~760 MHz), Kvco is about −1.5 GHz/V over
+  0.2–0.5 V, and the Xyce-verified 640 MHz lock would not transfer to
+  silicon if the PDK flow is the truth.  Decision needed: which PSP103 is
+  the reference (the PDK's Verilog-A, run by VACASK and ngspice, is the
+  natural one); then re-calibrate — or re-size the delay cell for
+  640 MHz — on that engine, and re-run the tests and the behavioral
+  numbers that carry the old curve.
 - **SPICE netlist emitter** (`kestrel/models/spice.py`) — full transistor-level
   netlist for all PLL blocks with testbench.  Emits a self-biased replica
   bias that tracks Vctrl (same topology as the validated `sim/` decks),
@@ -223,6 +268,11 @@ Refit behavioral model matches transistor curve within ±3.3%.
 - The generated Verilog-AMS has not been run on a Verilog-AMS simulator
   here (vamos's `-ams` flow is not implemented yet); its logic is verified
   with iverilog and its nvc form with nvc.
+- The vamos deck cannot run the VCO sweep (`kestrel_vco_tb.sp` uses Xyce's
+  `.STEP`/`.MEASURE`); on VACASK the sweep is one run per Vctrl
+  (`scratchpad`-style loop, 8 s a point) — a `run_vco_tb.sh` is the
+  obvious addition.  SPICE mode saves every node (`allpub`): 550 MB of
+  nutascii for the 2.6 us loop.
 - A faster first divider stage (prescaler): the six-NAND toggle stage is
   verified to 844 MHz on SG13G2 and mis-counts at 1.09 GHz, which is where
   the generated VCO sits with a discharged loop filter.  A cold power-up
@@ -723,6 +773,15 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
       0.45–0.58 ns and steady, PFD pulses 4–5 % UP / 3 % DN (reset-path
       widths).  Lock well inside the emitted 2.6 us transient; the 3 us run
       took 2.1 h in Xyce (132k steps)
+- [x] VACASK through vamos's spectre personality as the default functional
+      engine: `kestrel_tb_vamos.sp` + `run_tb.sh` + bundled
+      `sg13g2_lv_vamos.lib`; the SG13G2 loop runs in 352 s for 2.6 us
+      (Xyce: 2.1 h for 3 us)
+- [ ] SG13G2 VCO calibration against the PDK's PSP103: VACASK and ngspice
+      (PDK `psp103.va`) put the generated ring ~45 % faster than Xyce's
+      built-in level-103, so the loop designed on the Xyce curve runs away
+      on VACASK; pick the reference engine, re-calibrate or re-size, and
+      re-verify (see the open item above)
 
 ### M4: Layout and Extraction — IN PROGRESS
 

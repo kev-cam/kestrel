@@ -98,6 +98,23 @@ def test_emitted_files():
         check('bias replica Vctrl PFET drives vbn',
               re.search(r'^Xrep_pc vbn vctrl vdd vdd sg13_lv_pmos', vco, re.M) is not None)
         check('calibrated sizing in VCO netlist', 'W=2.000u L=0.340u' in vco and 'W=3.000u L=0.500u' in vco)
+        check('start-up kick lives inside the VCO subcircuit (one pulse, period > run)',
+              re.search(r'^Ikick 0 dp_0 PULSE\(0 1m 0 50p 50p 10n 1\)', vco, re.M) is not None)
+        tbx = open(os.path.join(out, 'kestrel_tb.sp')).read()
+        check('testbench has no top-level hierarchical kick', 'Xpll:Xvco:dp_0' not in tbx)
+        check('vamos deck and runner are emitted',
+              'kestrel_tb_vamos.sp' in names and 'run_tb.sh' in names
+              and os.access(os.path.join(out, 'run_tb.sh'), os.X_OK))
+        tbv = open(os.path.join(out, 'kestrel_tb_vamos.sp')).read()
+        check('vamos deck uses the wrapper library and Spectre hierarchical names',
+              '.INCLUDE "models/sg13g2_lv_vamos.lib"' in tbv and '.ic v(xpll.vctrl)=0.2' in tbv
+              and 'v(xpll.fb_clk)' in tbv and 'Xpll:' not in tbv)
+        check('vamos wrapper library bundled next to the deck',
+              os.path.isfile(os.path.join(out, 'models', 'sg13g2_lv_vamos.lib')))
+        runner = open(os.path.join(out, 'run_tb.sh')).read()
+        check('runner defaults to VACASK through vamos, Xyce on request',
+              'shims/spectre' in runner and '--vamos-analog=xyce' in runner and 'kestrel_tb.sp' in runner
+              and 'libs.tech/verilog-a/psp103' in runner)
         check('VCO outputs go through differential-to-CMOS buffers',
               re.search(r'^Xbufp outp dp_3 dn_3 vbn vdd vss kestrel_vco_buf', vco, re.M) is not None)
         pfd = open(os.path.join(out, 'kestrel_pfd.sp')).read()
