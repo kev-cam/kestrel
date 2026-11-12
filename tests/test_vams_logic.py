@@ -240,7 +240,7 @@ if __name__ == '__main__':
         print("  SKIP  iverilog/vvp not found (set IVERILOG and VVP)")
         sys.exit(0)
     print(f"  using {IVERILOG}")
-    run_loop('sg13g2', PLLSpec(freq_min=560e6, freq_max=720e6, ref_freq=20e6, loop_bw=2e6,
+    run_loop('sg13g2', PLLSpec(freq_min=840e6, freq_max=1080e6, ref_freq=30e6, loop_bw=2e6,
                                supply_voltage=1.2, process='sg13g2'))
     run_loop('sky130', PLLSpec(freq_min=800e6, freq_max=1.2e9, ref_freq=25e6, loop_bw=5e6))
     print(f"\n{PASS} passed, {FAIL} failed")

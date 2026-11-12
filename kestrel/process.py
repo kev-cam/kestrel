@@ -59,16 +59,25 @@ _PROCESS_PARAMS = {
         "pdk_root_default": "/usr/local/src/IHP-Open-PDK",
         "pdk_include_dirs": ["ihp-sg13g2/libs.tech/verilog-a/psp103",
                              "ihp-sg13g2/libs.tech/ngspice/models"],
-        # Transistor-level calibration (Xyce, PSP103 TT, 1.2 V, 2026-11-11).
-        # Sizing from sim/kes_vco_xyce_sg13g2.cir; the numbers below were
-        # measured on the *generated* VCO (kestrel_vco_tb.sp, sg13_lv_*
-        # wrappers with IHP's default S/D junction areas, CMOS output
-        # buffers): 844 MHz @ 0.20 V falling monotonically to 517 MHz @
-        # 0.50 V, Kvco ~ -1.09 GHz/V
-        # (Maneatis polarity: f falls as Vctrl rises), rail-to-rail CMOS
-        # outputs.  The bare M-card deck runs ~20% faster (no junction areas)
-        # and turns back up above 0.55 V, so stay within 0.2-0.5 V.  The
-        # design engine uses this block instead of the square-law estimate
+        # Transistor-level calibration (VACASK through vamos's spectre
+        # personality, the PDK's own PSP103 — psp103.va on the PDK's
+        # sg13g2_moslv_parm cards — TT, 1.2 V, 2026-11-12).  Sizing from
+        # sim/kes_vco_xyce_sg13g2.cir; the numbers below were measured on
+        # the *generated* VCO (kestrel_vco.sp, sg13_lv_* wrappers with
+        # IHP's default S/D junction areas, CMOS output buffers) in 50 mV
+        # steps: 1579 MHz at 0 V falling monotonically to 733 MHz at
+        # 0.55 V, then back up to a 965 MHz floor above 0.9 V where the
+        # Vctrl PFET is off and Istart plus the diode set the ring current.
+        # The linear window is 0.15-0.45 V (1299 -> 812 MHz; a
+        # least-squares fit gives Kvco = -1.634 GHz/V with residuals under
+        # 1.3 %), Maneatis polarity (f falls as Vctrl rises), rail-to-rail
+        # CMOS outputs.  ngspice with the PDK's OSDI psp103.va agrees
+        # within 1 %.  Xyce's built-in level-103 on the flattened TT cards
+        # runs the same ring ~45 % slower (844 MHz at 0.2 V, 517 at 0.5 V,
+        # minimum 511 at 0.6 V), so the Xyce deck settles at a different
+        # Vctrl: the PDK Verilog-A is the reference.  The design engine
+        # uses this block instead of the square-law estimate, places the
+        # spec's centre frequency on the fitted line (f_nom at vctrl_nom)
         # and the emitter swaps the charge-pump UP/DN inputs for the sign.
         "vco_calibration": {
             "tail_w": 4.0e-6, "tail_l": 0.5e-6,
@@ -76,19 +85,21 @@ _PROCESS_PARAMS = {
             "load_w": 3.0e-6, "load_l": 0.5e-6,
             "bias_w": 2.0e-6, "bias_l": 0.5e-6,
             "i_start": 5.0e-6,
-            "kvco": -1.09e9,          # Hz/V, signed
-            "vctrl_nom": 0.35,        # V, middle of the usable range
-            "vctrl_min": 0.20, "vctrl_max": 0.50,
-            "f_min": 517e6, "f_max": 844e6,
-            # Outside the monotonic range (generated VCO, Xyce): 1.09 GHz
-            # at Vctrl = 0 V, minimum 511 MHz at 0.6 V, then a 625 MHz
-            # floor above 0.9 V where the Vctrl PFET is off and Istart plus
-            # the diode set the ring current.
-            "f_vctrl0": 1.093e9,
+            "kvco": -1.634e9,         # Hz/V, signed; fit over 0.15-0.45 V
+            "vctrl_nom": 0.30,        # V, middle of the linear window
+            "f_nom": 1.044e9,         # Hz, the fitted line at vctrl_nom (measured 1036 MHz)
+            "vctrl_min": 0.15, "vctrl_max": 0.45,
+            "f_min": 812e6, "f_max": 1299e6,
+            # Outside the window (generated VCO, VACASK): 1.58 GHz at
+            # Vctrl = 0 V, minimum 733 MHz at 0.55 V, then the 965 MHz
+            # floor above 0.9 V.
+            "f_vctrl0": 1.579e9,
             # Highest input frequency at which the emitted 2^n divider
-            # chain was verified to count correctly (it mis-counts at
-            # 1.09 GHz, so a loop started from a discharged filter stalls).
-            "div_fmax": 844e6,
+            # chain was verified to count /32 correctly (VACASK, PDK
+            # PSP103, divider sized for a 960 MHz centre): 1.8 GHz, the
+            # highest point tried and above the VCO's top speed, so a
+            # power-up from a discharged filter stays within range.
+            "div_fmax": 1.8e9,
         },
     },
 }

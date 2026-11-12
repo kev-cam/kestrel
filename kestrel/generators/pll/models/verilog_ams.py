@@ -88,10 +88,17 @@ def reference_release_delay(d: PLLDesign) -> float:
 
 
 def simulation_time(d: PLLDesign) -> float:
-    """Seconds of transient the testbenches run (acquisition + settling)."""
+    """Seconds of transient the testbenches run (acquisition + settling).
+
+    The slew-limited acquisition (d.acq_time, with margin for cycle slips)
+    is followed by the overshoot settling out over several linear lock
+    times before the last quarter of the run, which the testbenches
+    measure, is clean (SG13G2 power-up from 0 V: within 0.5 mV of the
+    final Vctrl 0.5 us after the slew estimate).
+    """
     ref_period = 1.0 / d.spec.ref_freq
     return reference_release_delay(d) + (
-        max(d.acq_time * 1.5, d.lock_time * 3, 50 * ref_period)
+        max(d.acq_time * 1.5 + d.lock_time * 5, 50 * ref_period)
         if d.lock_time > 0 else 100 * ref_period)
 
 

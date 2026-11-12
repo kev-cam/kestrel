@@ -58,7 +58,10 @@ def vco_table(design: PLLDesign):
 
     if cal.get("vctrl_min") is not None and cal.get("vctrl_max") is not None:
         v_lo, v_hi = cal["vctrl_min"], cal["vctrl_max"]
-        pts = [(0.0, f_at(v_lo)), (v_lo, f_at(v_lo)), (design.vctrl_nom, design.f_center),
+        # below the window the measured 0 V point (if calibrated) anchors a
+        # power-up start; above it the law is held flat
+        f0 = cal.get("f_vctrl0") or f_at(v_lo)
+        pts = [(0.0, f0), (v_lo, f_at(v_lo)), (design.vctrl_nom, design.f_center),
                (v_hi, f_at(v_hi)), (vdd, f_at(v_hi))]
     else:
         pts = [(0.0, f_at(0.0)), (design.vctrl_nom, design.f_center), (vdd, f_at(vdd))]
@@ -84,7 +87,9 @@ def _design_to_params(design: PLLDesign) -> dict:
     cal = get_process_params(s.process).get("vco_calibration") or {}
     if cal.get("vctrl_min") is not None:
         table_note = (f"linear law over the calibrated {cal['vctrl_min']:.2f}-"
-                      f"{cal['vctrl_max']:.2f} V range, held flat outside it")
+                      f"{cal['vctrl_max']:.2f} V range, held flat above it"
+                      + (f", the measured {cal['f_vctrl0']/1e6:.0f} MHz at 0 V below it"
+                         if cal.get("f_vctrl0") else ", held flat below it"))
     else:
         table_note = "engine's linear law over 0-Vdd"
     cp_note = ("UP sinks: negative Kvco, f falls as Vctrl rises" if design.kvco_sign < 0

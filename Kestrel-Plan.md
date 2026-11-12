@@ -18,9 +18,9 @@ high-level specification and emits SPICE netlists, schematics, and layout.
 kestrel pll gen --freq-min 800M --freq-max 1.2G --ref-freq 25M --loop-bw 5M
 
 # IHP SG13G2: models are bundled, the output simulates as-is
-kestrel pll gen --freq-min 560M --freq-max 720M --ref-freq 20M --loop-bw 2M --process sg13g2
-(cd kestrel_out && Xyce kestrel_vco_tb.sp)   # open-loop VCO sweep
-(cd kestrel_out && Xyce kestrel_tb.sp)       # closed loop
+kestrel pll gen --freq-min 840M --freq-max 1080M --ref-freq 30M --loop-bw 2M --process sg13g2
+bash kestrel_out/run_tb.sh                   # closed loop on VACASK through vamos (--xyce: Xyce)
+(cd kestrel_out && Xyce kestrel_vco_tb.sp)   # open-loop VCO sweep (Xyce .STEP)
 
 # Grail generator (external plugin)
 KESTREL_PLUGINS=/usr/local/src/grail kestrel grail gen \
@@ -74,8 +74,8 @@ drive every representation.
   Verified with Icarus Verilog (`tests/test_vams_logic.py`: the emitted
   PFD and divider verbatim, the VCO with its control port made real, and
   an exact event-driven stand-in for the analog pump + filter): sg13g2
-  locks at 640.0 MHz / 0.350 V, sky130 at 1000.0 MHz / 0.900 V, |ref→fb|
-  under 25 ps.
+  locks at 960.0 MHz / 0.351 V from a discharged filter, sky130 at
+  1000.0 MHz / 0.900 V, |ref→fb| under 25 ps.
 - **stat-sim emitter** (`kestrel/models/statsim.py`) — the nvc runtime form
   of the same PLL, in the style of stat-sim's `nvcgen.py`: VHDL entities on
   the `prob_load` discipline (`kestrel_vco_pl`, `kestrel_pfd_pl`,
@@ -115,8 +115,9 @@ drive every representation.
   Xyce.  Behavioural runs for comparison: iverilog logic loop 0.13 s,
   nvc/stat-sim 0.19 s, generated ngspice bench 0.12 s, all for the same
   2.6 us.
-- **PSP103 model gap found by the VACASK run (open, needs a decision).**
-  On VACASK the loop did not lock: Vctrl ramped from 0.2 V to the rail and
+- **PSP103 model gap found by the VACASK run — resolved by re-calibrating
+  on the PDK's PSP103 (decision 2026-11-12).**  On VACASK the loop designed
+  on the Xyce curve did not lock: Vctrl ramped from 0.2 V to the rail and
   the VCO sat at 969 MHz.  Sweeping the generated VCO shows why — with the
   PDK's PSP103 (the PDK's `psp103.va` on its own cards, the IHP reference
   flow) the ring runs ~45 % faster than with Xyce's built-in level-103 on
@@ -131,15 +132,44 @@ drive every representation.
   | 0.6 V | 511 MHz (minimum) | 760 MHz (minimum) | — |
   | 1.0 V | 625 MHz (floor) | 963 MHz (floor) | — |
 
-  So `vco_calibration` for sg13g2 (measured on Xyce) is engine-specific:
-  with the PDK models the generated VCO cannot reach the 560–720 MHz
-  example at all (its minimum is ~760 MHz), Kvco is about −1.5 GHz/V over
-  0.2–0.5 V, and the Xyce-verified 640 MHz lock would not transfer to
-  silicon if the PDK flow is the truth.  Decision needed: which PSP103 is
-  the reference (the PDK's Verilog-A, run by VACASK and ngspice, is the
-  natural one); then re-calibrate — or re-size the delay cell for
-  640 MHz — on that engine, and re-run the tests and the behavioral
-  numbers that carry the old curve.
+  The PDK's Verilog-A, as VACASK and ngspice run it, is now the reference
+  and `vco_calibration` for sg13g2 is measured on VACASK through vamos
+  (50 mV steps over 0–1.2 V): 1579 MHz at 0 V, 1299 at 0.15, 1209 at 0.20,
+  1036 at 0.30, 954 at 0.35, 812 at 0.45, a minimum of 733 MHz at 0.55 V,
+  then a 965 MHz floor above 0.9 V.  The linear window is 0.15–0.45 V: a
+  least-squares fit gives Kvco = −1.634 GHz/V with 1044 MHz at 0.30 V and
+  residuals under 1.3 % (stored as `kvco`, `f_nom`, `vctrl_nom`,
+  `vctrl_min/max`, `f_min/max`, `f_vctrl0`).  The emitted divider counts
+  /32 cleanly to 1.8 GHz input on VACASK, above the VCO's 1.58 GHz at 0 V,
+  so `div_fmax ≥ f_vctrl0` and the testbenches now start from a discharged
+  loop filter — the real power-up — instead of the calibrated minimum
+  (VACASK's operating point also fails when `.ic` forces the filter below
+  ~0.17 V, while 0 V and ≥ 0.18 V converge).  The engine places the spec's
+  centre frequency on the fitted line (`vctrl_nom` = 0.30 V +
+  (f_center − 1044 MHz)/Kvco, clamped to the window), so every behavioral
+  form settles at the voltage the transistor-level loop does, and the
+  behavioral VCO table carries the measured 0 V point.  The delay cell's
+  reach with the PDK models is 733–1579 MHz, so the 560–720 MHz example
+  moved to 30 MHz × 32 = 960 MHz (`--freq-min 840M --freq-max 1080M
+  --ref-freq 30M`), which sits at Vctrl 0.351 V; a 640 MHz target needs a
+  slower (re-sized) delay cell, left as an open item.  The testbench run
+  length is now 1.5 × acquisition + 5 × lock time (3.89 us here) so the
+  measured last quarter is clean after the overshoot.  Results for the
+  960 MHz example: generated ngspice bench 959.8 MHz / 0.352 V in 0.21 s;
+  iverilog logic loop 960.0 MHz / 0.3514 V; nvc/stat-sim 959.98 MHz, lock
+  at 2.14 us; 10-seed Monte-Carlo (1 % stage jitter, 2 % mismatch, 5 % Icp,
+  5 ps reference jitter) f = 960.00 ± 0.05 MHz, t_lock 2.13 ± 0.10 us,
+  period jitter 3.69 ps rms, ref→fb 32.6 ± 7.8 ps rms, Vctrl 0.353 ±
+  0.004 V, 1.3 s for all ten.  Transistor level on VACASK through vamos
+  (power-up from 0 V): locks.  From 0 V the ring starts at 1.58 GHz and the divider
+  follows; the pump drives the control node to a 0.415 V overshoot at
+  ~1.0 us, the frequency is within 0.5 % of 960 MHz from 1.59 us on and
+  the last quarter (2.9–3.9 us) sits at 960.07 MHz (+0.008 %), Vctrl
+  0.345–0.349 V (4 mV of pump ripple; the behavioral forms settle at
+  0.351 V, the measured curve's 960 MHz point is 0.346 V), ref→fb
+  +0.29…+0.31 ns and steady.  592 s wall for 3.89 us (250k timepoints,
+  923 MB of allpub nutascii) — the run that took 2.1 h in Xyce for 3 us
+  of the old example.
 - **SPICE netlist emitter** (`kestrel/models/spice.py`) — full transistor-level
   netlist for all PLL blocks with testbench.  Emits a self-biased replica
   bias that tracks Vctrl (same topology as the validated `sim/` decks),
@@ -159,9 +189,11 @@ drive every representation.
   TT cards plus wrappers with IHP's `sg13_lv_nmos/pmos` subcircuit
   interface, bundled in `sim/models/` and copied next to every generated
   netlist.  `kestrel pll gen --process sg13g2` output parses and runs in
-  Xyce unmodified; the generated VCO is verified at 844 MHz (Vctrl 0.20 V)
-  to 517 MHz (0.50 V), the divider chain at 640 and 844 MHz, the PFD
-  standalone.  Process-calibrated sizing and the measured limits live in
+  Xyce unmodified and, through vamos, on VACASK with the PDK's own PSP103
+  (the default engine and the calibration reference since November 12):
+  the generated VCO covers 1299 MHz (Vctrl 0.15 V) to 812 MHz (0.45 V),
+  the divider chain counts /32 to 1.8 GHz, the PFD is verified standalone.
+  Process-calibrated sizing and the measured limits live in
   `kestrel/process.py` (`vco_calibration`).
 - **Behavioral emitter** (`kestrel/models/behavioral.py`) — the generated
   closed loop for stock ngspice (`kestrel_pll_behavioral.cir`): XSPICE
@@ -214,10 +246,10 @@ drive every representation.
 
 | Metric | Behavioral | Transistor (sky130) | Transistor (SG13G2, generated) |
 |--------|-----------|---------------------|--------------------------------|
-| VCO range | 71–1056 MHz | 477–789 MHz | 517–844 MHz (monotonic part; 1.09 GHz at 0 V) |
-| Kvco | ~707 MHz/V (linear) | ~298 MHz/V (saturating) | ~−1.09 GHz/V (monotonic, Maneatis polarity) |
-| Valid Vctrl | 0.1–1.5 V | 0.7–1.5 V | 0.2–0.5 V |
-| Simulator | ngspice + OSDI | Xyce | Xyce (PSP103) |
+| VCO range | 71–1056 MHz | 477–789 MHz | 812–1299 MHz (linear window; 1.58 GHz at 0 V, 733 MHz minimum at 0.55 V) |
+| Kvco | ~707 MHz/V (linear) | ~298 MHz/V (saturating) | −1.63 GHz/V (fit, Maneatis polarity) |
+| Valid Vctrl | 0.1–1.5 V | 0.7–1.5 V | 0.15–0.45 V |
+| Simulator | ngspice + OSDI | Xyce | VACASK via vamos, PDK PSP103 (Xyce's built-in PSP103 runs it 45 % slow) |
 
 Optimization converged in 112 evaluations (cost 0.363 → 0.249).
 Refit behavioral model matches transistor curve within ±3.3%.
@@ -273,11 +305,13 @@ Refit behavioral model matches transistor curve within ±3.3%.
   (`scratchpad`-style loop, 8 s a point) — a `run_vco_tb.sh` is the
   obvious addition.  SPICE mode saves every node (`allpub`): 550 MB of
   nutascii for the 2.6 us loop.
-- A faster first divider stage (prescaler): the six-NAND toggle stage is
-  verified to 844 MHz on SG13G2 and mis-counts at 1.09 GHz, which is where
-  the generated VCO sits with a discharged loop filter.  A cold power-up
-  from 0 V is therefore not covered; the testbench starts at the
-  calibrated 0.2 V and the design summary warns about it.  With the
+- A faster first divider stage (prescaler) for faster VCOs or slow
+  corners.  With the PDK's PSP103 the six-NAND toggle stage counts /32
+  cleanly to 1.8 GHz input on VACASK, above the generated VCO's 1.58 GHz
+  at 0 V, so a cold power-up from 0 V is covered and the testbenches start
+  there; on Xyce's built-in PSP103 the same chain was verified to 844 MHz
+  and mis-counted at 1.09 GHz, which is why the testbench used to start at
+  the calibrated 0.2 V with a warning.  With the
   loop-filter tap fixed this matters during acquisition too: every
   full-width charge-pump pulse moves the control node by Icp·R1 (0.22 V
   here, more than half the tuning range), so a cycle slip in the fast
@@ -369,16 +403,20 @@ Schematic netlist (from design engine)
   the flattened cards are used.  Design engine: kpn=299uA/V², vtn=0.255V,
   kpp=82uA/V², vtp=0.353V, plus a transistor-level `vco_calibration`
   (tail 4u/0.5u, pair 2u/0.34u, loads 3u/0.5u) measured on the generated
-  VCO: 844 MHz at Vctrl 0.20 V falling to 517 MHz at 0.50 V, Kvco ≈ −1.09
+  VCO with the PDK's own PSP103 (VACASK through vamos, November 12):
+  1299 MHz at Vctrl 0.15 V falling to 812 MHz at 0.45 V, Kvco = −1.634
   GHz/V — Maneatis polarity, so the emitter swaps the charge-pump UP/DN
-  inputs.  Full curve of the generated VCO (Xyce, 0.1 V steps): 1093 MHz at
-  0 V, 968 at 0.1, 844 at 0.2, 723 at 0.3, 609 at 0.4, 517 at 0.5, a
-  minimum of 511 MHz at 0.6 V, then back up to a 625 MHz floor from 0.9 V
-  (Vctrl PFET off; Istart and the replica diode set the ring current).
-  Stay within 0.2–0.5 V.  The emitted 2^n divider counts cleanly at 640
-  and 844 MHz and mis-counts at 1093 MHz, so the closed-loop testbench
-  starts the loop filter at 0.2 V (`.IC V(Xpll:vctrl)=0.2`) instead of a
-  discharged 0 V, and `kestrel pll gen` warns about it.  Acquisition is
+  inputs.  Full curve (50 mV steps): 1579 MHz at 0 V, 1390 at 0.1, 1209
+  at 0.2, 1036 at 0.3, 878 at 0.4, 762 at 0.5, a minimum of 733 MHz at
+  0.55 V, then back up to a 965 MHz floor from 0.9 V (Vctrl PFET off;
+  Istart and the replica diode set the ring current).  Stay within
+  0.15–0.45 V.  The emitted 2^n divider counts /32 cleanly to 1.8 GHz
+  input, so the closed-loop testbench starts from a discharged filter
+  (`.IC V(Xpll:vctrl)=0`).  The paragraphs below record the November 11
+  bring-up on Xyce's built-in level-103 with the flattened cards, which
+  runs this ring ~45 % slower (1093 MHz at 0 V, 844 at 0.2, 517 at 0.5,
+  minimum 511 at 0.6, 625 MHz floor; divider mis-counting at 1093 MHz,
+  hence the 0.2 V start and the 640 MHz example).  Acquisition is
   slew-limited: the charge pump moves the filter at about Icp/2/(C1+C2)
   while the PFD cycle-slips (0.34 V/us for the 2 MHz-bandwidth example),
   so the summary's linear lock time (230 ns) understates the time to lock
@@ -720,11 +758,11 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
 - [x] Full PLL behavioral testbench (plain netlist, pre_osdi + XSPICE digital)
 - [x] VCO range characterization script
 - [x] Verilog-AMS model set with event-driven logic and a closed-loop
-      testbench; logic verified with iverilog (sg13g2 640.0 MHz / 0.350 V,
-      sky130 1000.0 MHz / 0.900 V)
-- [x] nvc/stat-sim form with timing variability: 2.6 us of the sg13g2 loop
-      in 0.1 s, lock at 1.24 us, 5.6 ps rms period jitter at 1 % stage
-      jitter over 10 seeds
+      testbench; logic verified with iverilog (sg13g2 960.0 MHz / 0.351 V
+      from a discharged filter, sky130 1000.0 MHz / 0.900 V)
+- [x] nvc/stat-sim form with timing variability: 3.9 us of the sg13g2 loop
+      in 0.3 s, lock at 2.14 us from 0 V, 3.7 ps rms period jitter at 1 %
+      stage jitter over 10 seeds (1.3 s for the ten)
 - [x] Generated event-driven ngspice bench per design (`kestrel_pll_behavioral.cir`)
 
 ### M3: Transistor-Level VCO — DONE
@@ -777,11 +815,20 @@ gap requires SPICE simulation of the extracted netlist (not yet automated).
       engine: `kestrel_tb_vamos.sp` + `run_tb.sh` + bundled
       `sg13g2_lv_vamos.lib`; the SG13G2 loop runs in 352 s for 2.6 us
       (Xyce: 2.1 h for 3 us)
-- [ ] SG13G2 VCO calibration against the PDK's PSP103: VACASK and ngspice
+- [x] SG13G2 VCO calibration against the PDK's PSP103: VACASK and ngspice
       (PDK `psp103.va`) put the generated ring ~45 % faster than Xyce's
-      built-in level-103, so the loop designed on the Xyce curve runs away
-      on VACASK; pick the reference engine, re-calibrate or re-size, and
-      re-verify (see the open item above)
+      built-in level-103, so the loop designed on the Xyce curve ran away
+      on VACASK.  Decision: the PDK Verilog-A is the reference;
+      `vco_calibration` re-measured on VACASK (0.15–0.45 V window,
+      −1.634 GHz/V), divider verified to 1.8 GHz, testbenches start from a
+      discharged filter, example moved to 30 MHz × 32 = 960 MHz, all four
+      suites re-verified (58/51/12/26)
+- [x] SG13G2 closed loop of the emitted 960 MHz PLL on VACASK through vamos
+      (power-up from 0 V): locks; within 0.5 % from 1.59 us, last quarter 960.07 MHz
+      (+0.008 %) at Vctrl 0.345–0.349 V, ref→fb +0.3 ns steady; 592 s
+      wall for 3.89 us (250k timepoints)
+- [ ] A slower (re-sized) delay cell for a 640 MHz-class SG13G2 example;
+      the present cell's reach with the PDK models is 733–1579 MHz
 
 ### M4: Layout and Extraction — IN PROGRESS
 

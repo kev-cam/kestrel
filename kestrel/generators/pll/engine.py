@@ -128,10 +128,12 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
 
     # --- Process calibration (transistor-level validated VCO) ---
     # A process entry may carry a 'vco_calibration' block measured on its
-    # reference VCO deck (sim/kes_vco_xyce_<process>.cir).  When present it
-    # replaces the analytical Kvco / Vctrl estimates here and the square-law
-    # VCO sizing in _size_transistors, so the emitted VCO is one that is
-    # known to oscillate over the stated range.
+    # reference VCO deck (sim/kes_vco_xyce_<process>.cir) with the reference
+    # engine for that process (SG13G2: VACASK through vamos with the PDK's
+    # PSP103).  When present it replaces the analytical Kvco / Vctrl
+    # estimates here and the square-law VCO sizing in _size_transistors,
+    # so the emitted VCO is one that is known to oscillate over the stated
+    # range.
     cal = _PROCESS_PARAMS.get(spec.process, {}).get("vco_calibration")
     if cal:
         if cal.get("kvco"):
@@ -139,9 +141,23 @@ def design_pll(spec: PLLSpec) -> PLLDesign:
             d.kvco_sign = -1 if cal["kvco"] < 0 else 1
         if cal.get("vctrl_nom") is not None:
             d.vctrl_nom = cal["vctrl_nom"]
-        if cal.get("vctrl_min") is not None:
-            # Start the closed-loop testbench at the calibrated minimum
-            # rather than at 0 V: a discharged loop filter puts a
+            if cal.get("f_nom") and cal.get("kvco"):
+                # Put the spec's centre frequency on the calibrated line
+                # (f_nom at vctrl_nom, slope kvco) so the behavioral models
+                # and the transistor-level loop settle at the same control
+                # voltage; clamp to the linear window.
+                v = cal["vctrl_nom"] + (d.f_center - cal["f_nom"]) / cal["kvco"]
+                d.vctrl_nom = min(max(v, cal.get("vctrl_min", v)), cal.get("vctrl_max", v))
+        div_follows = bool(cal.get("f_vctrl0") and cal.get("div_fmax")
+                           and cal["f_vctrl0"] <= cal["div_fmax"])
+        if div_follows:
+            # The divider chain is verified above the VCO's top speed, so
+            # the testbenches exercise the real power-up: a discharged
+            # loop filter (0 V).
+            d.vctrl_start = 0.0
+        elif cal.get("vctrl_min") is not None:
+            # Otherwise start the closed-loop testbench at the calibrated
+            # minimum rather than at 0 V: a discharged loop filter puts a
             # negative-Kvco VCO at its top speed, which can be more than
             # the divider chain follows.
             d.vctrl_start = cal["vctrl_min"]

@@ -615,8 +615,8 @@ if [ "$MC" -gt 1 ]; then
            if (k == "t_lock_us" && v < 0) {{ unlocked++; continue }}
            n[k]++; s[k] += v; s2[k] += v * v; if (!(k in order)) {{ order[k] = ++no; names[no] = k }} }} }}
        END {{ for (j = 1; j <= no; j++) {{ k = names[j]; m = s[k] / n[k]; var = s2[k] / n[k] - m * m;
-              if (var < 0) var = 0; printf "  %-12s %12.5g +/- %-10.4g (n=%d)\n", k, m, sqrt(var), n[k] }}
-              if (unlocked > 0) printf "  %d seed(s) never met the lock criterion\n", unlocked }}' statsim_mc.log
+              if (var < 0) var = 0; printf "  %-12s %12.5g +/- %-10.4g (n=%d)\\n", k, m, sqrt(var), n[k] }}
+              if (unlocked > 0) printf "  %d seed(s) never met the lock criterion\\n", unlocked }}' statsim_mc.log
 fi
 """)
     os.chmod(path, 0o755)

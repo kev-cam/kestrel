@@ -51,7 +51,12 @@ def test_calibration():
     check('calibrated startup current applied', abs(design.vco_i_start - cal['i_start']) < 1e-15)
     check('negative Kvco recorded with positive magnitude',
           design.kvco_sign == -1 and design.kvco > 0)
-    check('Vctrl nominal from calibration', abs(design.vctrl_nom - cal['vctrl_nom']) < 1e-9)
+    v_line = cal['vctrl_nom'] + (design.f_center - cal['f_nom']) / cal['kvco']
+    check('Vctrl nominal puts f_center on the calibrated line, inside the window',
+          abs(design.vctrl_nom - v_line) < 1e-9
+          and cal['vctrl_min'] <= design.vctrl_nom <= cal['vctrl_max'], f'{design.vctrl_nom:.4f} V')
+    check('calibration: divider verified above the VCO top speed (power-up in range)',
+          cal['div_fmax'] >= cal['f_vctrl0'])
     # sky130 has no calibration block: square-law sizing and +Kvco unchanged
     d130 = design_pll(PLLSpec(freq_min=800e6, freq_max=1.2e9, ref_freq=25e6, loop_bw=5e6))
     check('sky130 keeps positive Kvco', d130.kvco_sign == 1)
@@ -68,10 +73,11 @@ def test_emitted_files():
         b = tb.find('.INCLUDE "models/sg13g2_lv.lib"')
         check('testbench includes model files, cards before wrappers', 0 <= a < b)
         check('testbench supply is 1.2 V', re.search(r'^Vdd vdd 0 1\.2\s*$', tb, re.M) is not None)
-        check('testbench starts the loop filter at the calibrated minimum (0.2 V)',
-              re.search(r'^\.IC V\(Xpll:vctrl\)=0\.2\s*$', tb, re.M) is not None)
-        check('design warns that a 0 V start outruns the divider',
-              any('divider chain is verified only to 844 MHz' in w for w in design.warnings),
+        check('testbench starts from a discharged loop filter (power-up, 0 V)',
+              design.vctrl_start == 0.0
+              and re.search(r'^\.IC V\(Xpll:vctrl\)=0\s*$', tb, re.M) is not None)
+        check('no divider-range warning (chain verified above the VCO top speed)',
+              not any('divider chain is verified only' in w for w in design.warnings),
               '; '.join(design.warnings))
         check('acquisition estimate exceeds the linear lock time',
               design.acq_time > design.lock_time > 0,
@@ -107,7 +113,8 @@ def test_emitted_files():
               and os.access(os.path.join(out, 'run_tb.sh'), os.X_OK))
         tbv = open(os.path.join(out, 'kestrel_tb_vamos.sp')).read()
         check('vamos deck uses the wrapper library and Spectre hierarchical names',
-              '.INCLUDE "models/sg13g2_lv_vamos.lib"' in tbv and '.ic v(xpll.vctrl)=0.2' in tbv
+              '.INCLUDE "models/sg13g2_lv_vamos.lib"' in tbv
+              and re.search(r'^\.ic v\(xpll\.vctrl\)=0\s*$', tbv, re.M) is not None
               and 'v(xpll.fb_clk)' in tbv and 'Xpll:' not in tbv)
         check('vamos wrapper library bundled next to the deck',
               os.path.isfile(os.path.join(out, 'models', 'sg13g2_lv_vamos.lib')))
@@ -158,7 +165,7 @@ def test_emitted_files():
               re.search(r'^Xcp cp_out dn up pbias nbias', top, re.M) is not None)
         vtb = open(os.path.join(out, 'kestrel_vco_tb.sp')).read()
         check('VCO testbench sweeps the calibrated Vctrl range',
-              re.search(r'^\.STEP vctrl_val 0\.2 0\.5 ', vtb, re.M) is not None)
+              re.search(r'^\.STEP vctrl_val 0\.15 0\.45 ', vtb, re.M) is not None)
         xyce = shutil.which('Xyce')
         if xyce:
             r = subprocess.run([xyce, '-norun', 'kestrel_tb.sp'], cwd=out,

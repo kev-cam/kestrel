@@ -183,8 +183,11 @@ kestrel gui --process sky130
 # Generated event-driven bench on stock ngspice (0.1 s)
 cd kestrel_out &amp;&amp; ngspice -b kestrel_pll_behavioral.cir
 
-# Transistor-level closed loop: VACASK through vamos (SG13G2: 352 s for 2.6 us);
-# --vamos-xyce or --xyce for Xyce (2.1 h for 3 us)
+# IHP SG13G2 example (PDK PSP103 calibration, 30 MHz x 32 = 960 MHz)
+kestrel pll gen --freq-min 840M --freq-max 1080M --ref-freq 30M --loop-bw 2M --process sg13g2
+
+# Transistor-level closed loop: VACASK through vamos (SG13G2 power-up: 592 s for 3.9 us, locks from 0 V);
+# --vamos-xyce or --xyce for Xyce (2.1 h for 3 us; its built-in PSP103 runs this ring 45 % slow)
 bash kestrel_out/run_tb.sh
 
 # Generated nvc/stat-sim form, 20-seed Monte-Carlo with timing variability

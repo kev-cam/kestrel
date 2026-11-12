@@ -689,7 +689,7 @@ def _testbench_text(d: PLLDesign, vamos: bool = False) -> str:
     # Long enough to see lock: the slew-limited acquisition from a
     # discharged loop filter (d.acq_time) dominates, not the linear
     # lock_time.
-    sim_time = ref_delay + (max(d.acq_time * 1.5, d.lock_time * 3, 50 * ref_period)
+    sim_time = ref_delay + (max(d.acq_time * 1.5 + d.lock_time * 5, 50 * ref_period)
                             if d.lock_time > 0 else 100 * ref_period)
     if d.vctrl_start > 0:
         start_note = (f"{d.vctrl_start:.3g} V, the bottom of the calibrated Vctrl range\n"

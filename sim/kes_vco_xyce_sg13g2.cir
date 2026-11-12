@@ -119,8 +119,16 @@ Ikick 0 Xvco:dp_0 PULSE(0 1m 0 50p 50p 10n 0)
 * (0.2-0.5 V, inverted charge-pump polarity) or resize before use.
 * NOTE: these M-cards carry no AS/AD/PS/PD, i.e. no junction parasitics.
 * The same sizing emitted by `kestrel pll gen --process sg13g2` (X-instances
-* of the sg13_lv_* wrappers, IHP default S/D areas) runs ~20% slower:
-* 844 MHz @ 0.20 V to 517 MHz @ 0.50 V — that curve is the one recorded
-* in kestrel/process.py as the sg13g2 calibration.
+* of the sg13_lv_* wrappers, IHP default S/D areas) runs ~20% slower in
+* Xyce: 844 MHz @ 0.20 V to 517 MHz @ 0.50 V.
+* 2026-11-12: Xyce's built-in level-103 is the outlier.  With the PDK's own
+* PSP103 (psp103.va on the PDK's cards; VACASK through vamos and ngspice
+* OSDI agree within 1 %) the generated VCO runs ~45 % faster — 1579 MHz at
+* 0 V, 1299 @ 0.15, 1209 @ 0.20, 954 @ 0.35, 812 @ 0.45, minimum 733 @ 0.55,
+* 965 MHz floor above 0.9 V — and that VACASK curve (0.15-0.45 V window,
+* Kvco -1.634 GHz/V) is the one recorded in kestrel/process.py as the
+* sg13g2 calibration.  Sweep it on VACASK with
+* `spectre -I<pdk>/verilog-a/psp103 -I<pdk>/ngspice/models` over the
+* generated kestrel_vco.sp (one run per Vctrl, ~8 s each).
 
 .END

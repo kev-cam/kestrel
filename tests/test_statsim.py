@@ -51,7 +51,7 @@ STATSIM_DIR = os.environ.get('STATSIM_DIR', '/usr/local/src/stat-sim')
 HAVE_STATSIM = os.path.isfile(os.path.join(STATSIM_DIR, 'lib', 'statsim_disc.vhd'))
 
 SPECS = {
-    'sg13g2': PLLSpec(freq_min=560e6, freq_max=720e6, ref_freq=20e6, loop_bw=2e6,
+    'sg13g2': PLLSpec(freq_min=840e6, freq_max=1080e6, ref_freq=30e6, loop_bw=2e6,
                       supply_voltage=1.2, process='sg13g2'),
     'sky130': PLLSpec(freq_min=800e6, freq_max=1.2e9, ref_freq=25e6, loop_bw=5e6),
 }
@@ -114,6 +114,32 @@ def _run_nvc(label, spec, env_extra, stop_ns):
         shutil.rmtree(out, ignore_errors=True)
 
 
+def _run_mc(label, spec, env_extra, seeds):
+    """run_statsim.sh --mc N: every seed runs and the awk summary prints."""
+    design = design_pll(spec)
+    out = tempfile.mkdtemp(prefix=f'kestrel_statsim_mc_{label}_')
+    try:
+        emit_statsim(design, out)
+        env = dict(os.environ, NVC=NVC, STATSIM_DIR=STATSIM_DIR, **env_extra)
+        if NVC_LIB:
+            env['NVC_LIB'] = NVC_LIB
+        r = subprocess.run(['bash', 'run_statsim.sh', '--mc', str(seeds)], cwd=out, env=env,
+                           capture_output=True, text=True, timeout=900)
+        text = r.stdout + r.stderr
+        runs = re.findall(r'^KESTREL_STATSIM seed=(\d+) ', text, re.M)
+        check(f'{label}: --mc {seeds} runs every seed', r.returncode == 0 and len(runs) == seeds,
+              f'rc {r.returncode}, {len(runs)} result lines')
+        m = re.search(r'^\s*f_MHz\s+([0-9.]+) \+/- ([0-9.e+-]+)\s+\(n=(\d+)\)', text, re.M)
+        check(f'{label}: Monte-Carlo summary prints mean +/- sd per metric',
+              'awk:' not in text and m is not None and int(m.group(3)) == seeds, text.strip()[-600:])
+        if m:
+            f_target = design.n_nom * spec.ref_freq / 1e6
+            check(f'{label}: Monte-Carlo mean frequency within 0.1 % of N*f_ref',
+                  abs(float(m.group(1)) - f_target) < 1e-3 * f_target, m.group(0))
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
 def test_nvc():
     for label, spec in SPECS.items():
         vals, design = _run_nvc(label, spec, {}, 0)
@@ -134,6 +160,8 @@ def test_nvc():
               f"{vals['f']} MHz")
         check('variability run shows period jitter (1 % stage jitter -> a few ps rms)',
               1.0 < vals['jit'] < 50.0, f"{vals['jit']} ps")
+    _run_mc('sg13g2', SPECS['sg13g2'],
+            {'SIGMA_J': '0.01', 'SIGMA_MM': '0.02', 'SIGMA_ICP': '0.05', 'SIGMA_REF': '5e-12'}, 3)
 
 
 if __name__ == '__main__':
